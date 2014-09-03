@@ -657,6 +657,11 @@ static int mrf24j40_hw_init(struct mrf24j40 *devrec)
 	if (ret)
 		goto err_ret;
 
+	/* Xsilon change interrupt polarity */
+	ret = write_long_reg(devrec, REG_SLPCON0, 0x2);
+	if (ret)
+		goto err_ret;
+
 	ret = write_long_reg(devrec, REG_SLPCON1, 0x21);
 	if (ret)
 		goto err_ret;
