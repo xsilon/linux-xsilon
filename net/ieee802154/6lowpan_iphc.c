@@ -160,7 +160,7 @@ static int uncompress_context_based_src_addr(struct sk_buff *skb,
 		/* TODO */
 	case LOWPAN_IPHC_ADDR_03:
 		/* TODO */
-		netdev_warn(skb->dev, "SAM value 0x%x not supported\n", sam);
+		pr_debug("SAM value 0x%x not supported\n", sam);
 		return -EINVAL;
 	default:
 		pr_debug("Invalid sam value: 0x%x\n", sam);
