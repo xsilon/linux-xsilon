@@ -182,10 +182,10 @@ static int skb_deliver(struct sk_buff *skb, struct ipv6hdr *hdr,
 
 	new = skb_copy_expand(skb, sizeof(struct ipv6hdr), skb_tailroom(skb),
 								GFP_ATOMIC);
-	kfree_skb(skb);
-
 	if (!new)
 		return -ENOMEM;
+
+	kfree_skb(skb);
 
 	skb_push(new, sizeof(struct ipv6hdr));
 	skb_reset_network_header(new);
@@ -199,6 +199,8 @@ static int skb_deliver(struct sk_buff *skb, struct ipv6hdr *hdr,
 			new->data, new->len);
 
 	stat = deliver_skb(new);
+	if (stat < 0)
+		stat = NET_RX_DROP;
 
 	kfree_skb(new);
 
@@ -337,7 +339,7 @@ err:
 /* TTL uncompression values */
 static const u8 lowpan_ttl_values[] = { 0, 1, 64, 255 };
 
-int lowpan_process_data(struct sk_buff *skb, struct net_device *dev,
+int lowpan_process_data(struct sk_buff **skb_inout, struct net_device *dev,
 		const u8 *saddr, const u8 saddr_type, const u8 saddr_len,
 		const u8 *daddr, const u8 daddr_type, const u8 daddr_len,
 		u8 iphc0, u8 iphc1, skb_delivery_cb deliver_skb)
@@ -345,6 +347,8 @@ int lowpan_process_data(struct sk_buff *skb, struct net_device *dev,
 	struct ipv6hdr hdr = {};
 	u8 tmp, num_context = 0;
 	int err;
+	int err_ret = -EINVAL;
+	struct sk_buff *skb = *skb_inout;
 
 	raw_dump_table(__func__, "raw skb data dump uncompressed",
 				skb->data, skb->len);
@@ -467,7 +471,6 @@ int lowpan_process_data(struct sk_buff *skb, struct net_device *dev,
 	/* UDP data uncompression */
 	if (iphc0 & LOWPAN_IPHC_NH_C) {
 		struct udphdr uh;
-		struct sk_buff *new;
 		if (uncompress_udp_header(skb, &uh))
 			goto drop;
 
@@ -475,14 +478,15 @@ int lowpan_process_data(struct sk_buff *skb, struct net_device *dev,
 		 * replace the compressed UDP head by the uncompressed UDP
 		 * header
 		 */
-		new = skb_copy_expand(skb, sizeof(struct udphdr),
+		skb = skb_copy_expand(skb, sizeof(struct udphdr),
 				      skb_tailroom(skb), GFP_ATOMIC);
-		kfree_skb(skb);
-
-		if (!new)
-			return -ENOMEM;
-
-		skb = new;
+		if (!skb) {
+			err_ret = -ENOMEM;
+			goto drop;
+		}
+		
+		kfree_skb(*skb_inout);
+		*skb_inout = skb;
 
 		skb_push(skb, sizeof(struct udphdr));
 		skb_reset_transport_header(skb);
@@ -510,8 +514,7 @@ int lowpan_process_data(struct sk_buff *skb, struct net_device *dev,
 	return skb_deliver(skb, &hdr, dev, deliver_skb);
 
 drop:
-	kfree_skb(skb);
-	return -EINVAL;
+	return err_ret;
 }
 EXPORT_SYMBOL_GPL(lowpan_process_data);
 
