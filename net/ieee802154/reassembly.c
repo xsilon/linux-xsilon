@@ -370,8 +370,10 @@ int lowpan_frag_rcv(struct sk_buff *skb, const u8 frag_type)
 	if (err < 0)
 		goto err;
 
-	if (frag_info->d_size > ieee802154_lowpan->max_dsize)
+	if (frag_info->d_size > IPV6_MIN_MTU) {
+		netdev_warn(skb->dev, "datagram size exceeds IPv6 Min MTU\n");
 		goto err;
+	}
 
 	inet_frag_evictor(&ieee802154_lowpan->frags, &lowpan_frags, false);
 
@@ -415,13 +417,6 @@ static struct ctl_table lowpan_frags_ns_ctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_jiffies,
 	},
-	{
-		.procname	= "6lowpanfrag_max_datagram_size",
-		.data		= &init_net.ieee802154_lowpan.max_dsize,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
 	{ }
 };
 
@@ -453,7 +448,6 @@ static int __net_init lowpan_frags_ns_sysctl_register(struct net *net)
 		table[0].data = &ieee802154_lowpan->frags.high_thresh;
 		table[1].data = &ieee802154_lowpan->frags.low_thresh;
 		table[2].data = &ieee802154_lowpan->frags.timeout;
-		table[3].data = &ieee802154_lowpan->max_dsize;
 
 		/* Don't export sysctls to unprivileged users */
 		if (net->user_ns != &init_user_ns)
@@ -528,7 +522,6 @@ static int __net_init lowpan_frags_init_net(struct net *net)
 	ieee802154_lowpan->frags.high_thresh = IPV6_FRAG_HIGH_THRESH;
 	ieee802154_lowpan->frags.low_thresh = IPV6_FRAG_LOW_THRESH;
 	ieee802154_lowpan->frags.timeout = IPV6_FRAG_TIMEOUT;
-	ieee802154_lowpan->max_dsize = 0xFFFF;
 
 	inet_frags_init_net(&ieee802154_lowpan->frags);
 
