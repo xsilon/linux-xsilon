@@ -198,7 +198,7 @@ static int skb_deliver(struct sk_buff *skb, struct ipv6hdr *hdr,
 	raw_dump_table(__func__, "raw skb data dump before receiving",
 			new->data, new->len);
 
-	stat = deliver_skb(new, dev);
+	stat = deliver_skb(new);
 
 	kfree_skb(new);
 

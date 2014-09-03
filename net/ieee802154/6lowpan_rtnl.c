@@ -143,8 +143,7 @@ static int lowpan_header_create(struct sk_buff *skb,
 			type, (void *)&da, (void *)&sa, 0);
 }
 
-static int lowpan_give_skb_to_devices(struct sk_buff *skb,
-					struct net_device *dev)
+static int lowpan_give_skb_to_devices(struct sk_buff *skb)
 {
 	struct lowpan_dev_record *entry;
 	struct sk_buff *skb_cp;
@@ -480,7 +479,7 @@ static int lowpan_rcv(struct sk_buff *skb, struct net_device *dev,
 		/* Pull off the 1-byte of 6lowpan header. */
 		skb_pull(skb, 1);
 
-		ret = lowpan_give_skb_to_devices(skb, NULL);
+		ret = lowpan_give_skb_to_devices(skb);
 		if (ret == NET_RX_DROP)
 			goto drop;
 	} else {

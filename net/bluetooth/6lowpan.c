@@ -166,7 +166,7 @@ static struct lowpan_dev *lookup_dev(struct l2cap_conn *conn)
 	return dev;
 }
 
-static int give_skb_to_upper(struct sk_buff *skb, struct net_device *dev)
+static int give_skb_to_upper(struct sk_buff *skb)
 {
 	struct sk_buff *skb_cp;
 	int ret;
