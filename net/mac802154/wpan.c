@@ -433,7 +433,7 @@ mac802154_subif_frame(struct mac802154_sub_if_data *sdata, struct sk_buff *skb,
 
 	switch (mac_cb(skb)->dest.mode) {
 	case IEEE802154_ADDR_NONE:
-		if (mac_cb(skb)->dest.mode != IEEE802154_ADDR_NONE)
+		if (mac_cb(skb)->type != IEEE802154_FC_TYPE_ACK)
 			/* FIXME: check if we are PAN coordinator */
 			skb->pkt_type = PACKET_OTHERHOST;
 		else
@@ -462,7 +462,9 @@ mac802154_subif_frame(struct mac802154_sub_if_data *sdata, struct sk_buff *skb,
 			skb->pkt_type = PACKET_OTHERHOST;
 		break;
 	default:
-		break;
+		spin_unlock_bh(&sdata->mib_lock);
+		kfree_skb(skb);
+		return NET_RX_DROP;
 	}
 
 	spin_unlock_bh(&sdata->mib_lock);
