@@ -74,6 +74,10 @@
 #define TX_FIFO_SIZE 128 /* From datasheet */
 #define RX_FIFO_SIZE 144 /* From datasheet */
 #define SET_CHANNEL_DELAY_US 192 /* From datasheet */
+	{ "mrf24j40", MRF24J40 },
+	{ "mrf24j40ma", MRF24J40MA },
+	{ "mrf24j40mc", MRF24J40MC },
+enum mrf24j40_modules { MRF24J40, MRF24J40MA, MRF24J40MC };
 
 /* Device Private Data */
 struct mrf24j40 {
@@ -690,6 +694,35 @@ static int mrf24j40_hw_init(struct mrf24j40 *devrec)
 	if (ret)
 		goto err_ret;
 
+	if (spi_get_device_id(devrec->spi)->driver_data == MRF24J40MC) {
+		/* Enable external amplifier */
+		ret = write_long_reg(devrec, REG_TESTMODE, 0xF);
+		if (ret)
+			goto err_ret;
+
+		ret = read_short_reg(devrec, REG_TRISGPIO, &val);
+		if (ret)
+			goto err_ret;
+
+		val |= 0x8;
+		ret = write_short_reg(devrec, REG_TRISGPIO, val);
+		if (ret)
+			goto err_ret;
+
+		ret = read_short_reg(devrec, REG_GPIO, &val);
+		if (ret)
+			goto err_ret;
+
+		val |= 0x8;
+		ret = write_short_reg(devrec, REG_GPIO, val);
+		if (ret)
+			goto err_ret;
+
+		ret = write_long_reg(devrec, REG_RFCON3, 0x28);
+		if (ret)
+			goto err_ret;
+	}
+
 	return 0;
 
 err_ret:
@@ -778,8 +811,9 @@ static int mrf24j40_remove(struct spi_device *spi)
 }
 
 static const struct spi_device_id mrf24j40_ids[] = {
-	{ "mrf24j40", 0 },
-	{ "mrf24j40ma", 0 },
+	{ "mrf24j40", MRF24J40 },
+	{ "mrf24j40ma", MRF24J40MA },
+	{ "mrf24j40mc", MRF24J40MC },
 	{ },
 };
 MODULE_DEVICE_TABLE(spi, mrf24j40_ids);
