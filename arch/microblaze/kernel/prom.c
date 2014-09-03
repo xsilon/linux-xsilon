@@ -103,7 +103,7 @@ void __init early_init_devtree(void *params)
 	pr_debug(" -> early_init_devtree(%p)\n", params);
 
 	early_init_dt_scan(params);
-	if (!strlen(boot_command_line))
+	if (strlen(cmd_line))
 		strlcpy(boot_command_line, cmd_line, COMMAND_LINE_SIZE);
 
 	parse_early_param();
