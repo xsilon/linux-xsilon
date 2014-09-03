@@ -54,8 +54,6 @@ void __init setup_arch(char **cmdline_p)
 {
 	*cmdline_p = boot_command_line;
 
-	console_verbose();
-
 	unflatten_device_tree();
 
 	setup_cpuinfo();
