@@ -694,6 +694,7 @@ static int mrf24j40_hw_init(struct mrf24j40 *devrec)
 		goto err_ret;
 
 	val &= ~0x3; /* Clear RX mode (normal) */
+	val |= 0x1;  /* Enable promiscuous mode */
 
 	ret = write_short_reg(devrec, REG_RXMCR, val);
 	if (ret)
