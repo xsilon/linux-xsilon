@@ -182,6 +182,7 @@ die() {
 oe_runmake_call() {
 	bbnote make -j 8  "$@"
 	make -j 8  "$@"
+	make -j 8 modules
 
 }
 
