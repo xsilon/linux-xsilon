@@ -215,10 +215,10 @@ static int process_data(struct sk_buff **skb_inout, struct net_device *netdev,
 	if (lowpan_fetch_skb_u8(skb, &iphc1))
 		goto drop;
 
-	return lowpan_process_data(skb_inout, netdev,
+	return lowpan_iphc_header_uncompress(skb_inout, netdev,
 				   saddr, IEEE802154_ADDR_LONG, EUI64_ADDR_LEN,
 				   daddr, IEEE802154_ADDR_LONG, EUI64_ADDR_LEN,
-				   iphc0, iphc1, give_skb_to_upper);
+				   iphc0, iphc1);
 
 drop:
 	return -EINVAL;
@@ -274,8 +274,11 @@ static int recv_pkt(struct sk_buff *skb, struct net_device *dev,
 				kfree_skb(local_skb);
 				goto drop;
 			}
-			if (ret != NET_RX_SUCCESS)
+
+			if (give_skb_to_upper(local_skb) != NET_RX_SUCCESS) {
+				kfree_skb(local_skb);
 				goto drop;
+			}
 
 			dev->stats.rx_bytes += skb->len;
 			dev->stats.rx_packets++;

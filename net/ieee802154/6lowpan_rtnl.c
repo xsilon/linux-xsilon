@@ -166,7 +166,7 @@ static int lowpan_give_skb_to_devices(struct sk_buff *skb)
 	return stat;
 }
 
-static int process_data(struct sk_buff **skb_inout, const struct ieee802154_hdr *hdr)
+static int iphc_uncompress_hdr(struct sk_buff **skb_inout, const struct ieee802154_hdr *hdr)
 {
 	u8 iphc0, iphc1;
 	struct ieee802154_addr_sa sa, da;
@@ -197,10 +197,10 @@ static int process_data(struct sk_buff **skb_inout, const struct ieee802154_hdr 
 	else
 		dap = &da.hwaddr;
 
-	return lowpan_process_data(skb_inout, skb->dev, sap, sa.addr_type,
+	return lowpan_iphc_header_uncompress(skb_inout, skb->dev, 
+				   sap, sa.addr_type,
 				   IEEE802154_ADDR_LEN, dap, da.addr_type,
-				   IEEE802154_ADDR_LEN, iphc0, iphc1,
-				   lowpan_give_skb_to_devices);
+				   IEEE802154_ADDR_LEN, iphc0, iphc1);
 
 drop:
 	return -EINVAL;
@@ -473,36 +473,35 @@ static int lowpan_rcv(struct sk_buff *skb, struct net_device *dev,
 
 	/* check that it's our buffer */
 	if (skb->data[0] == LOWPAN_DISPATCH_IPV6) {
-		skb->protocol = htons(ETH_P_IPV6);
-		skb->pkt_type = PACKET_HOST;
-
 		/* Pull off the 1-byte of 6lowpan header. */
 		skb_pull(skb, 1);
 
-		ret = lowpan_give_skb_to_devices(skb);
-		if (ret == NET_RX_DROP)
-			goto drop;
+		ret = NET_RX_SUCCESS;
 	} else {
 		switch (skb->data[0] & 0xe0) {
 		case LOWPAN_DISPATCH_IPHC:	/* ipv6 datagram */
-			ret = process_data(&skb, &hdr);
-			if (ret == NET_RX_DROP)
+			ret = iphc_uncompress_hdr(&skb, &hdr);
+			if (ret < 0)
 				goto drop;
 			break;
 		case LOWPAN_DISPATCH_FRAG1:	/* first fragment header */
 			ret = lowpan_frag_rcv(skb, LOWPAN_DISPATCH_FRAG1);
 			if (ret == 1) {
-				ret = process_data(&skb, &hdr);
-				if (ret == NET_RX_DROP)
+				ret = iphc_uncompress_hdr(&skb, &hdr);
+				if (ret < 0)
 					goto drop;
+			} else {
+				return NET_RX_SUCCESS;
 			}
 			break;
 		case LOWPAN_DISPATCH_FRAGN:	/* next fragments headers */
 			ret = lowpan_frag_rcv(skb, LOWPAN_DISPATCH_FRAGN);
 			if (ret == 1) {
-				ret = process_data(&skb, &hdr);
-				if (ret == NET_RX_DROP)
+				ret = iphc_uncompress_hdr(&skb, &hdr);
+				if (ret < 0)
 					goto drop;
+			} else {
+				return NET_RX_SUCCESS;
 			}
 			break;
 		default:
@@ -510,7 +509,16 @@ static int lowpan_rcv(struct sk_buff *skb, struct net_device *dev,
 		}
 	}
 
-	return NET_RX_SUCCESS;
+	/* Pass IPv6 packet up to next layer */
+	skb->protocol = htons(ETH_P_IPV6);
+	skb->pkt_type = PACKET_HOST;
+	ret = lowpan_give_skb_to_devices(skb);
+	if (ret < 0)
+		goto drop_skb;
+
+	kfree_skb(skb);
+	return ret;
+
 drop_skb:
 	kfree_skb(skb);
 drop:

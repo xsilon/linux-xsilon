@@ -174,39 +174,6 @@ static int uncompress_context_based_src_addr(struct sk_buff *skb,
 	return 0;
 }
 
-static int skb_deliver(struct sk_buff *skb, struct ipv6hdr *hdr,
-		struct net_device *dev, skb_delivery_cb deliver_skb)
-{
-	struct sk_buff *new;
-	int stat;
-
-	new = skb_copy_expand(skb, sizeof(struct ipv6hdr), skb_tailroom(skb),
-								GFP_ATOMIC);
-	if (!new)
-		return -ENOMEM;
-
-	kfree_skb(skb);
-
-	skb_push(new, sizeof(struct ipv6hdr));
-	skb_reset_network_header(new);
-	skb_copy_to_linear_data(new, hdr, sizeof(struct ipv6hdr));
-
-	new->protocol = htons(ETH_P_IPV6);
-	new->pkt_type = PACKET_HOST;
-	new->dev = dev;
-
-	raw_dump_table(__func__, "raw skb data dump before receiving",
-			new->data, new->len);
-
-	stat = deliver_skb(new);
-	if (stat < 0)
-		stat = NET_RX_DROP;
-
-	kfree_skb(new);
-
-	return stat;
-}
-
 /* Uncompress function for multicast destination address,
  * when M bit is set.
  */
@@ -339,10 +306,11 @@ err:
 /* TTL uncompression values */
 static const u8 lowpan_ttl_values[] = { 0, 1, 64, 255 };
 
-int lowpan_process_data(struct sk_buff **skb_inout, struct net_device *dev,
+int lowpan_iphc_header_uncompress(struct sk_buff **skb_inout, 
+		struct net_device *dev,
 		const u8 *saddr, const u8 saddr_type, const u8 saddr_len,
 		const u8 *daddr, const u8 daddr_type, const u8 daddr_len,
-		u8 iphc0, u8 iphc1, skb_delivery_cb deliver_skb)
+		u8 iphc0, u8 iphc1)
 {
 	struct ipv6hdr hdr = {};
 	u8 tmp, num_context = 0;
@@ -511,12 +479,29 @@ int lowpan_process_data(struct sk_buff **skb_inout, struct net_device *dev,
 	raw_dump_table(__func__, "raw header dump", (u8 *)&hdr,
 							sizeof(hdr));
 
-	return skb_deliver(skb, &hdr, dev, deliver_skb);
+	/* Setup skb with new uncompressed IPv6 header. */
+	skb = skb_copy_expand(skb, sizeof(hdr), skb_tailroom(skb),
+			      GFP_ATOMIC);
+	if (!skb)
+		return -ENOMEM;
+
+	kfree_skb(*skb_inout);
+	*skb_inout = skb;
+
+	skb_push(skb, sizeof(hdr));
+	skb_reset_network_header(skb);
+	skb_copy_to_linear_data(skb, &hdr, sizeof(hdr));
+	skb->dev = dev;
+
+	raw_dump_table(__func__, "raw skb data dump before receiving",
+		       skb->data, skb->len);
+
+	return 0;
 
 drop:
 	return err_ret;
 }
-EXPORT_SYMBOL_GPL(lowpan_process_data);
+EXPORT_SYMBOL_GPL(lowpan_iphc_header_uncompress);
 
 static u8 lowpan_compress_addr_64(u8 **hc06_ptr, u8 shift,
 				const struct in6_addr *ipaddr,
