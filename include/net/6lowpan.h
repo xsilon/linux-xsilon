@@ -154,11 +154,28 @@
 	 (((a)[6]) == 0xFF) &&	\
 	 (((a)[7]) == 0xFF))
 
+#define lowpan_dispatch_is_nalp(a)	\
+	(((a) & LOWPAN_DISPATCH_MAJOR) == 0x00)
+
+#define lowpan_dispatch_is_mesh(a)	\
+	(((a) & LOWPAN_DISPATCH_MAJOR) == 0x80)
+	
+#define lowpan_dispatch_is_broadcast(a)	\
+	((a) == LOWPAN_DISPATCH_BCAST)
+
+#define lowpan_dispatch_is_frag(a)	\
+	(((a) & LOWPAN_DISPATCH_MASK) == LOWPAN_DISPATCH_FRAG1 || \
+	 ((a) & LOWPAN_DISPATCH_MASK) == LOWPAN_DISPATCH_FRAGN)
+
+#define LOWPAN_DISPATCH_MAJOR	0xc0
+#define LOWPAN_DISPATCH_MINOR	0x3f
+
 #define LOWPAN_DISPATCH_IPV6	0x41 /* 01000001 = 65 */
 #define LOWPAN_DISPATCH_HC1	0x42 /* 01000010 = 66 */
 #define LOWPAN_DISPATCH_IPHC	0x60 /* 011xxxxx = ... */
 #define LOWPAN_DISPATCH_FRAG1	0xc0 /* 11000xxx */
 #define LOWPAN_DISPATCH_FRAGN	0xe0 /* 11100xxx */
+#define LOWPAN_DISPATCH_BCAST	0x50 /* 01010000 */
 
 #define LOWPAN_DISPATCH_MASK	0xf8 /* 11111000 */
 

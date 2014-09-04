@@ -471,41 +471,47 @@ static int lowpan_rcv(struct sk_buff *skb, struct net_device *dev,
 	if (ieee802154_hdr_peek_addrs(skb, &hdr) < 0)
 		goto drop_skb;
 
-	/* check that it's our buffer */
-	if (skb->data[0] == LOWPAN_DISPATCH_IPV6) {
-		/* Pull off the 1-byte of 6lowpan header. */
-		skb_pull(skb, 1);
+	/* First off if frame is No A LoWPAN Packet (NALP) then chuck away */
+	if (lowpan_dispatch_is_nalp(skb->data[0])) {
+		goto drop_skb;
+	}
 
-		ret = NET_RX_SUCCESS;
+	/* The 6LoWPAN header stack comprimises of the following (in order)
+	    Mesh, Broadcast, Fragmentation */
+	if (lowpan_dispatch_is_mesh(skb->data[0])) {
+		/* Not supported */
+		goto drop_skb;
+	} 
+
+	if (lowpan_dispatch_is_broadcast(skb->data[0])) {
+		/* Not supported */
+		goto drop_skb;
+	}
+
+	if (lowpan_dispatch_is_frag(skb->data[0])) {
+		u8 frag_dispatch = skb->data[0] & 0xe0;
+
+		ret = lowpan_frag_rcv(skb, frag_dispatch);
+		if (ret != 1) {
+			/* more frags to process */
+			return NET_RX_SUCCESS;
+		}
+	}
+
+	/* We should now be at the IPv6 Header (Compressed or Uncompressed) */
+	if (skb->data[0] == LOWPAN_DISPATCH_IPV6) {
+		/* Uncompressed, Pull off the dispatch byte */
+		skb_pull(skb, 1);
 	} else {
-		switch (skb->data[0] & 0xe0) {
-		case LOWPAN_DISPATCH_IPHC:	/* ipv6 datagram */
+		if ((skb->data[0] & 0xe0) == LOWPAN_DISPATCH_IPHC) {
+			/* Compressed with IPHC - RFC 6282 */
 			ret = iphc_uncompress_hdr(&skb, &hdr);
 			if (ret < 0)
 				goto drop;
-			break;
-		case LOWPAN_DISPATCH_FRAG1:	/* first fragment header */
-			ret = lowpan_frag_rcv(skb, LOWPAN_DISPATCH_FRAG1);
-			if (ret == 1) {
-				ret = iphc_uncompress_hdr(&skb, &hdr);
-				if (ret < 0)
-					goto drop;
-			} else {
-				return NET_RX_SUCCESS;
-			}
-			break;
-		case LOWPAN_DISPATCH_FRAGN:	/* next fragments headers */
-			ret = lowpan_frag_rcv(skb, LOWPAN_DISPATCH_FRAGN);
-			if (ret == 1) {
-				ret = iphc_uncompress_hdr(&skb, &hdr);
-				if (ret < 0)
-					goto drop;
-			} else {
-				return NET_RX_SUCCESS;
-			}
-			break;
-		default:
-			break;
+		} else {
+			/* other compression formats to follow, probably best
+			   using a compression ops linked to dispatch decoding */
+			goto drop_skb;
 		}
 	}
 
