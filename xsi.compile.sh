@@ -181,8 +181,8 @@ die() {
 
 oe_runmake_call() {
 	bbnote make -j 8  "$@"
-	make -j 8  "$@"
-	make -j 8 modules
+	make -j 8 LOCALVERSION= "$@"
+	make -j 8 LOCALVERSION= modules
 
 }
 
