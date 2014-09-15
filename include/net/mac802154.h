@@ -80,7 +80,8 @@ struct ieee802154_dev {
 #define	IEEE802154_HW_OMIT_CKSUM	0x00000001
 /* Indicates that receiver will autorespond with ACK frames. */
 #define	IEEE802154_HW_AACK		0x00000002
-/* Indicates that transceiver will support transmit power setting. */
+
+ /* Indicates that transceiver will support transmit power setting. */
 #define IEEE802154_HW_TXPOWER 		0x00000004
 /* Indicates that transceiver will support listen before transmit. */
 #define IEEE802154_HW_LBT 		0x00000008
