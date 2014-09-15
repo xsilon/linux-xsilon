@@ -492,7 +492,9 @@ static int lowpan_rcv(struct sk_buff *skb, struct net_device *dev,
 		u8 frag_dispatch = skb->data[0] & 0xe0;
 
 		ret = lowpan_frag_rcv(skb, frag_dispatch);
-		if (ret != 1) {
+		if (ret < 0) {
+			goto drop;
+		} else if (ret != 1) {
 			/* more frags to process */
 			return NET_RX_SUCCESS;
 		}
@@ -507,7 +509,7 @@ static int lowpan_rcv(struct sk_buff *skb, struct net_device *dev,
 			/* Compressed with IPHC - RFC 6282 */
 			ret = iphc_uncompress_hdr(&skb, &hdr);
 			if (ret < 0)
-				goto drop;
+				goto drop_skb;
 		} else {
 			/* other compression formats to follow, probably best
 			   using a compression ops linked to dispatch decoding */
