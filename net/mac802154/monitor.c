@@ -94,7 +94,7 @@ mac802154_monitor_rx_flags(struct net_device *dev, int change)
 
 	if (change & IFF_PROMISC) {
 		if (priv->ops->set_promiscous_mode &&
-		    priv->hw.flags & IEEE802154_HW_PROMISCOUS)
+		    priv->hw.flags & IEEE802154_HW_PROMISCUOUS)
 			priv->ops->set_promiscous_mode(&priv->hw, 
 						      dev->flags & IFF_PROMISC);
 	}
