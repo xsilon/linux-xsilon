@@ -93,8 +93,8 @@ struct ieee802154_dev {
 #define IEEE802154_HW_CSMA_PARAMS	0x00000040
 /* Indicates that transceiver will support ARET frame retries setting. */
 #define IEEE802154_HW_FRAME_RETRIES	0x00000080
-/* Indicates that transceiver will support promiscous mode setting. */
-#define IEEE802154_HW_PROMISCOUS	0x00000100
+/* Indicates that transceiver will support promiscuous mode setting. */
+#define IEEE802154_HW_PROMISCUOUS	0x00000100
 
 /* struct ieee802154_ops - callbacks from mac802154 to the driver
  *
