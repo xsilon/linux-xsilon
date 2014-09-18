@@ -346,6 +346,19 @@ mac802154_wpan_xmit(struct sk_buff *skb, struct net_device *dev)
 	return mac802154_tx(priv->hw, skb, page, chan);
 }
 
+static void
+mac802154_wpan_rx_flags(struct net_device *dev, int change)
+{
+	struct mac802154_sub_if_data *sdata = netdev_priv(dev);
+	struct mac802154_priv *priv = sdata->hw;
+
+	if (change & IFF_PROMISC) {
+		if (priv->ops->set_promisc_mode)
+			priv->ops->set_promisc_mode(&priv->hw, 
+						    dev->flags & IFF_PROMISC);
+	}
+}
+
 static struct header_ops mac802154_header_ops = {
 	.create		= mac802154_header_create,
 	.parse		= mac802154_header_parse,
@@ -357,6 +370,7 @@ static const struct net_device_ops mac802154_wpan_ops = {
 	.ndo_start_xmit		= mac802154_wpan_xmit,
 	.ndo_do_ioctl		= mac802154_wpan_ioctl,
 	.ndo_set_mac_address	= mac802154_wpan_mac_addr,
+	.ndo_change_rx_flags	= mac802154_wpan_rx_flags,
 };
 
 static void mac802154_wpan_free(struct net_device *dev)
