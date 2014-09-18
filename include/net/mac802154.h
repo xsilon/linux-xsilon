@@ -94,8 +94,6 @@ struct ieee802154_dev {
 #define IEEE802154_HW_CSMA_PARAMS	0x00000040
 /* Indicates that transceiver will support ARET frame retries setting. */
 #define IEEE802154_HW_FRAME_RETRIES	0x00000080
-/* Indicates that transceiver will support promiscuous mode setting. */
-#define IEEE802154_HW_PROMISCUOUS	0x00000100
 
 /* struct ieee802154_ops - callbacks from mac802154 to the driver
  *
@@ -182,8 +180,8 @@ struct ieee802154_ops {
 					   u8 min_be, u8 max_be, u8 retries);
 	int		(*set_frame_retries)(struct ieee802154_dev *dev,
 					     s8 retries);
-	int		(*set_promiscous_mode)(struct ieee802154_dev *dev,
-					       bool on);
+	int		(*set_promisc_mode)(struct ieee802154_dev *dev,
+					    bool on);
 };
 
 /* Basic interface to register ieee802154 device */
