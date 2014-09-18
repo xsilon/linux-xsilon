@@ -315,7 +315,6 @@ int lowpan_iphc_header_uncompress(struct sk_buff **skb_inout,
 	struct ipv6hdr hdr = {};
 	u8 tmp, num_context = 0;
 	int err;
-	int err_ret = -EINVAL;
 	struct sk_buff *skb = *skb_inout;
 
 	raw_dump_table(__func__, "raw skb data dump uncompressed",
@@ -325,7 +324,7 @@ int lowpan_iphc_header_uncompress(struct sk_buff **skb_inout,
 	if (iphc1 & LOWPAN_IPHC_CID) {
 		pr_debug("CID flag is set, increase header with one\n");
 		if (lowpan_fetch_skb_u8(skb, &num_context))
-			goto drop;
+			return -EINVAL;
 	}
 
 	hdr.version = 6;
@@ -338,7 +337,7 @@ int lowpan_iphc_header_uncompress(struct sk_buff **skb_inout,
 	 */
 	case 0: /* 00b */
 		if (lowpan_fetch_skb_u8(skb, &tmp))
-			goto drop;
+			return -EINVAL;
 
 		memcpy(&hdr.flow_lbl, &skb->data[0], 3);
 		skb_pull(skb, 3);
@@ -352,7 +351,7 @@ int lowpan_iphc_header_uncompress(struct sk_buff **skb_inout,
 	 */
 	case 2: /* 10b */
 		if (lowpan_fetch_skb_u8(skb, &tmp))
-			goto drop;
+			return -EINVAL;
 
 		hdr.priority = ((tmp >> 2) & 0x0f);
 		hdr.flow_lbl[0] = ((tmp << 6) & 0xC0) | ((tmp >> 2) & 0x30);
@@ -363,7 +362,7 @@ int lowpan_iphc_header_uncompress(struct sk_buff **skb_inout,
 	 */
 	case 1: /* 01b */
 		if (lowpan_fetch_skb_u8(skb, &tmp))
-			goto drop;
+			return -EINVAL;
 
 		hdr.flow_lbl[0] = (skb->data[0] & 0x0F) | ((tmp >> 2) & 0x30);
 		memcpy(&hdr.flow_lbl[1], &skb->data[0], 2);
@@ -380,7 +379,7 @@ int lowpan_iphc_header_uncompress(struct sk_buff **skb_inout,
 	if ((iphc0 & LOWPAN_IPHC_NH_C) == 0) {
 		/* Next header is carried inline */
 		if (lowpan_fetch_skb_u8(skb, &(hdr.nexthdr)))
-			goto drop;
+			return -EINVAL;
 
 		pr_debug("NH flag is set, next header carried inline: %02x\n",
 			 hdr.nexthdr);
@@ -391,7 +390,7 @@ int lowpan_iphc_header_uncompress(struct sk_buff **skb_inout,
 		hdr.hop_limit = lowpan_ttl_values[iphc0 & 0x03];
 	else {
 		if (lowpan_fetch_skb_u8(skb, &(hdr.hop_limit)))
-			goto drop;
+			return -EINVAL;
 	}
 
 	/* Extract SAM to the tmp variable */
@@ -411,7 +410,7 @@ int lowpan_iphc_header_uncompress(struct sk_buff **skb_inout,
 
 	/* Check on error of previous branch */
 	if (err)
-		goto drop;
+		return -EINVAL;
 
 	/* Extract DAM to the tmp variable */
 	tmp = ((iphc1 & LOWPAN_IPHC_DAM_11) >> LOWPAN_IPHC_DAM_BIT) & 0x03;
@@ -425,7 +424,7 @@ int lowpan_iphc_header_uncompress(struct sk_buff **skb_inout,
 			err = lowpan_uncompress_multicast_daddr(
 						skb, &hdr.daddr, tmp);
 			if (err)
-				goto drop;
+				return -EINVAL;
 		}
 	} else {
 		err = uncompress_addr(skb, &hdr.daddr, tmp, daddr,
@@ -433,14 +432,14 @@ int lowpan_iphc_header_uncompress(struct sk_buff **skb_inout,
 		pr_debug("dest: stateless compression mode %d dest %pI6c\n",
 			tmp, &hdr.daddr);
 		if (err)
-			goto drop;
+			return -EINVAL;
 	}
 
 	/* UDP data uncompression */
 	if (iphc0 & LOWPAN_IPHC_NH_C) {
 		struct udphdr uh;
 		if (uncompress_udp_header(skb, &uh))
-			goto drop;
+			return -EINVAL;
 
 		/*
 		 * replace the compressed UDP head by the uncompressed UDP
@@ -449,8 +448,7 @@ int lowpan_iphc_header_uncompress(struct sk_buff **skb_inout,
 		skb = skb_copy_expand(skb, sizeof(struct udphdr),
 				      skb_tailroom(skb), GFP_ATOMIC);
 		if (!skb) {
-			err_ret = -ENOMEM;
-			goto drop;
+			return -ENOMEM;
 		}
 		
 		kfree_skb(*skb_inout);
@@ -497,9 +495,6 @@ int lowpan_iphc_header_uncompress(struct sk_buff **skb_inout,
 		       skb->data, skb->len);
 
 	return 0;
-
-drop:
-	return err_ret;
 }
 EXPORT_SYMBOL_GPL(lowpan_iphc_header_uncompress);
 
