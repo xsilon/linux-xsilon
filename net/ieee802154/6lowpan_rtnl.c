@@ -578,7 +578,7 @@ static int lowpan_rcv(struct sk_buff *skb, struct net_device *dev,
 						      skb_tailroom(skb),
 						      GFP_ATOMIC);
 				if (!new)
-					return -ENOMEM;
+					goto drop_skb;
 				consume_skb(skb);
 				skb = new;
 			}
