@@ -306,7 +306,7 @@ err:
 /* TTL uncompression values */
 static const u8 lowpan_ttl_values[] = { 0, 1, 64, 255 };
 
-int lowpan_iphc_header_uncompress(struct sk_buff **skb_inout, 
+int lowpan_iphc_header_uncompress(struct sk_buff *skb, 
 		struct net_device *dev,
 		const u8 *saddr, const u8 saddr_type, const u8 saddr_len,
 		const u8 *daddr, const u8 daddr_type, const u8 daddr_len,
@@ -315,7 +315,6 @@ int lowpan_iphc_header_uncompress(struct sk_buff **skb_inout,
 	struct ipv6hdr hdr = {};
 	u8 tmp, num_context = 0;
 	int err;
-	struct sk_buff *skb = *skb_inout;
 
 	raw_dump_table(__func__, "raw skb data dump uncompressed",
 				skb->data, skb->len);
@@ -445,14 +444,13 @@ int lowpan_iphc_header_uncompress(struct sk_buff **skb_inout,
 		 * replace the compressed UDP head by the uncompressed UDP
 		 * header
 		 */
-		skb = skb_copy_expand(skb, sizeof(struct udphdr),
-				      skb_tailroom(skb), GFP_ATOMIC);
-		if (!skb) {
-			return -ENOMEM;
+		if (skb_headroom(skb) < sizeof(struct udphdr) + sizeof(hdr)) {
+			err = pskb_expand_head(skb, sizeof(struct udphdr) + 
+					       sizeof(hdr), 0, GFP_ATOMIC);
+
+			if (unlikely(err))
+				return err;
 		}
-		
-		kfree_skb(*skb_inout);
-		*skb_inout = skb;
 
 		skb_push(skb, sizeof(struct udphdr));
 		skb_reset_transport_header(skb);
@@ -462,6 +460,13 @@ int lowpan_iphc_header_uncompress(struct sk_buff **skb_inout,
 				      (u8 *)&uh, sizeof(uh));
 
 		hdr.nexthdr = UIP_PROTO_UDP;
+	} else {
+		if (skb_headroom(skb) < sizeof(hdr)) {
+			err = pskb_expand_head(skb, sizeof(hdr), 0, GFP_ATOMIC);
+
+			if (unlikely(err))
+				return err;
+		}
 	}
 
 	hdr.payload_len = htons(skb->len);
@@ -478,14 +483,6 @@ int lowpan_iphc_header_uncompress(struct sk_buff **skb_inout,
 							sizeof(hdr));
 
 	/* Setup skb with new uncompressed IPv6 header. */
-	skb = skb_copy_expand(skb, sizeof(hdr), skb_tailroom(skb),
-			      GFP_ATOMIC);
-	if (!skb)
-		return -ENOMEM;
-
-	kfree_skb(*skb_inout);
-	*skb_inout = skb;
-
 	skb_push(skb, sizeof(hdr));
 	skb_reset_network_header(skb);
 	skb_copy_to_linear_data(skb, &hdr, sizeof(hdr));

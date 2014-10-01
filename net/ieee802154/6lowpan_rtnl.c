@@ -165,12 +165,11 @@ static int lowpan_give_skb_to_devices(struct sk_buff *skb)
 	return stat;
 }
 
-static int iphc_uncompress_hdr(struct sk_buff **skb_inout, const struct ieee802154_hdr *hdr)
+static int iphc_uncompress_hdr(struct sk_buff *skb, const struct ieee802154_hdr *hdr)
 {
 	u8 iphc0, iphc1;
 	struct ieee802154_addr_sa sa, da;
 	void *sap, *dap;
-	struct sk_buff *skb = *skb_inout;
 
 	raw_dump_table(__func__, "raw skb data dump", skb->data, skb->len);
 	/* at least two bytes will be used for the encoding */
@@ -196,7 +195,22 @@ static int iphc_uncompress_hdr(struct sk_buff **skb_inout, const struct ieee8021
 	else
 		dap = &da.hwaddr;
 
-	return lowpan_iphc_header_uncompress(skb_inout, skb->dev, 
+	/* depcomression routine may use pskb_expand_head so we have to ensure
+	 * no references, if there are then we have to make a copy and as we
+         * are making a copy then ensure there's room for decompression */
+	if (skb_cloned(skb)) {
+		struct sk_buff *skb2;
+
+		skb2 = skb_copy_expand(skb, sizeof(*hdr) + 
+				       sizeof(sizeof(struct udphdr)), 
+				       skb_tailroom(skb), GFP_ATOMIC);
+		if (!skb2)
+			return -ENOMEM;
+		consume_skb(skb);
+		skb = skb2;
+	}
+
+	return lowpan_iphc_header_uncompress(skb, skb->dev, 
 				   sap, sa.addr_type,
 				   IEEE802154_ADDR_LEN, dap, da.addr_type,
 				   IEEE802154_ADDR_LEN, iphc0, iphc1);
@@ -567,7 +581,7 @@ static int lowpan_rcv(struct sk_buff *skb, struct net_device *dev,
 	} else {
 		if ((skb->data[0] & 0xe0) == LOWPAN_DISPATCH_IPHC) {
 			/* Compressed with IPHC - RFC 6282 */
-			ret = iphc_uncompress_hdr(&skb, &hdr);
+			ret = iphc_uncompress_hdr(skb, &hdr);
 			if (ret < 0)
 				goto drop_skb;
 		} else {
