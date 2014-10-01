@@ -539,6 +539,9 @@ static int lowpan_rcv(struct sk_buff *skb, struct net_device *dev,
 	if (!netif_running(dev))
 		goto drop_skb;
 
+	if (skb->pkt_type == PACKET_OTHERHOST)
+		goto drop_skb;
+
 	if (dev->type != ARPHRD_IEEE802154)
 		goto drop_skb;
 
@@ -593,7 +596,6 @@ static int lowpan_rcv(struct sk_buff *skb, struct net_device *dev,
 
 	/* Pass IPv6 packet up to next layer */
 	skb->protocol = htons(ETH_P_IPV6);
-	skb->pkt_type = PACKET_HOST;
 	ret = lowpan_give_skb_to_devices(skb);
 	if (ret < 0)
 		goto drop_skb;
