@@ -95,6 +95,8 @@ struct ieee802154_dev {
 /* Indicates that transceiver will support ARET frame retries setting. */
 #define IEEE802154_HW_FRAME_RETRIES	0x00000080
 
+#define IEEE802154_HW_PROMISCUOUS 0x00000100
+
 /* struct ieee802154_ops - callbacks from mac802154 to the driver
  *
  * This structure contains various callbacks that the driver may
