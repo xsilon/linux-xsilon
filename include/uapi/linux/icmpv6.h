@@ -107,6 +107,8 @@ struct icmp6hdr {
 #define ICMPV6_MOBILE_PREFIX_SOL	146
 #define ICMPV6_MOBILE_PREFIX_ADV	147
 
+#define ICMPV6_RPL_CONTROL		155
+
 /*
  *	Codes for Destination Unreachable
  */
