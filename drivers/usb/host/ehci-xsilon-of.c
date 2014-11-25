@@ -41,6 +41,7 @@ unsigned int xsilon_ehci_readl(const struct ehci_hcd *ehci,
 	u32 offset;
 
 	offset = regs - &ehci->regs->command;
+
 	iowrite32(offset, ehci->regs);
 	iowrite32(1, ehci->regs + 0x0C);
 	iowrite32(0, ehci->regs + 0x0C);
@@ -54,6 +55,7 @@ void xsilon_ehci_writel(const struct ehci_hcd *ehci,
 	u32 offset;
 
 	offset = regs - &ehci->regs->command;
+	printk(KERN_NOTICE "USB: 0x%04x <- %u\n", offset, val);
 	iowrite32(offset | (val << 16), ehci->regs);
 	iowrite32(1, ehci->regs + 0x08);
 	iowrite32(0, ehci->regs + 0x08);
@@ -165,6 +167,7 @@ static int ehci_hcd_xsilon_of_probe(struct platform_device *op)
 	struct resource res;
 	int irq;
 	int rv;
+	unsigned int reg;
 	//int *value;
 
 	if (usb_disabled())
@@ -203,6 +206,20 @@ static int ehci_hcd_xsilon_of_probe(struct platform_device *op)
 	iowrite32(0, ehci->regs + 0x4);
 	iowrite32(1, ehci->regs + 0x4);
 
+	/* Reset all and wait at least 200ms for reset */
+	xsilon_ehci_writel(ehci, 0x01, (__u32 __iomem *)(ehci->regs + 0x8C));
+	mdelay(250);
+	/* Sets up HW Mode, interrupts and locks the interface bus */
+	xsilon_ehci_writel(ehci, 0x0F, (__u32 __iomem *)(ehci->regs + 0x84));
+	/* Turn on VBUS */
+	reg = xsilon_ehci_readl(ehci, (__u32 __iomem *)(ehci->regs + 0x96));
+	reg &= ~0x80;
+	xsilon_ehci_writel(ehci, reg, (__u32 __iomem *)(ehci->regs + 0x96));
+
+	reg = xsilon_ehci_readl(ehci, (__u32 __iomem *)(ehci->regs + 0x80));
+	printk(KERN_NOTICE "USB: Read CHIP ID: 0x%04x\n", reg);
+	reg = xsilon_ehci_readl(ehci, (__u32 __iomem *)(ehci->regs + 0x82));
+	printk(KERN_NOTICE "USB: Read CHIP ID: 0x%04x\n", reg);
 	/* This core always has big-endian register interface and uses
 	 * big-endian memory descriptors.
 	 */
