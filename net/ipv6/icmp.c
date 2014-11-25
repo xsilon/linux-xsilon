@@ -767,6 +767,7 @@ static int icmpv6_rcv(struct sk_buff *skb)
 	case ICMPV6_DHAAD_REPLY:
 	case ICMPV6_MOBILE_PREFIX_SOL:
 	case ICMPV6_MOBILE_PREFIX_ADV:
+	case ICMPV6_RPL_CONTROL:
 		break;
 
 	default:
