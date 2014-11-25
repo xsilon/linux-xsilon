@@ -34,6 +34,33 @@
 #include <linux/of_irq.h>
 
 
+
+unsigned int xsilon_ehci_readl(const struct ehci_hcd *ehci,
+		__u32 __iomem * regs)
+{
+	u32 offset;
+
+	offset = regs - &ehci->regs->command;
+	iowrite32(offset, ehci->regs);
+	iowrite32(1, ehci->regs + 0x0C);
+	iowrite32(0, ehci->regs + 0x0C);
+
+	return (u32)ioread32(ehci->regs + 0x10);
+}
+
+void xsilon_ehci_writel(const struct ehci_hcd *ehci,
+		const unsigned int val, __u32 __iomem *regs)
+{
+	u32 offset;
+
+	offset = regs - &ehci->regs->command;
+	iowrite32(offset | (val << 16), ehci->regs);
+	iowrite32(1, ehci->regs + 0x08);
+	iowrite32(0, ehci->regs + 0x08);
+}
+
+
+
 #if 0
 /**
  * ehci_xilinx_port_handed_over - hand the port out if failed to enable it
@@ -138,7 +165,7 @@ static int ehci_hcd_xsilon_of_probe(struct platform_device *op)
 	struct resource res;
 	int irq;
 	int rv;
-	int *value;
+	//int *value;
 
 	if (usb_disabled())
 		return -ENODEV;
@@ -172,15 +199,20 @@ static int ehci_hcd_xsilon_of_probe(struct platform_device *op)
 	}
 
 	ehci = hcd_to_ehci(hcd);
+	/* reset Ian's dodgy USB interface */
+	iowrite32(0, ehci->regs + 0x4);
+	iowrite32(1, ehci->regs + 0x4);
 
 	/* This core always has big-endian register interface and uses
 	 * big-endian memory descriptors.
 	 */
-	ehci->big_endian_mmio = 1;
-	ehci->big_endian_desc = 1;
+	//ehci->big_endian_mmio = 1;
+	//ehci->big_endian_desc = 1;
 
 	/* Check whether the FS support option is selected in the hardware.
 	 */
+	hcd->has_tt = 1;
+#if 0
 	value = (int *)of_get_property(dn, "xlnx,support-usb-fs", NULL);
 	if (value && (*value == 1)) {
 		ehci_dbg(ehci, "USB host controller supports FS devices\n");
@@ -190,7 +222,7 @@ static int ehci_hcd_xsilon_of_probe(struct platform_device *op)
 			"USB host controller is HS only\n");
 		hcd->has_tt = 0;
 	}
-
+#endif
 	/* Debug registers are at the first 0x100 region
 	 */
 	ehci->caps = hcd->regs + 0x100;

@@ -717,16 +717,16 @@ ehci_port_speed(struct ehci_hcd *ehci, unsigned int portsc)
 #define writel_be(val, addr)	__raw_writel(val, (__force unsigned *)addr)
 #endif
 
+extern unsigned int xsilon_ehci_readl(const struct ehci_hcd *ehci,
+		__u32 __iomem * regs);
+extern void xsilon_ehci_writel(const struct ehci_hcd *ehci,
+		const unsigned int val, __u32 __iomem *regs);
+
+
 static inline unsigned int ehci_readl(const struct ehci_hcd *ehci,
 		__u32 __iomem * regs)
 {
-#ifdef CONFIG_USB_EHCI_BIG_ENDIAN_MMIO
-	return ehci_big_endian_mmio(ehci) ?
-		readl_be(regs) :
-		readl(regs);
-#else
-	return readl(regs);
-#endif
+	return xsilon_ehci_readl(ehci, regs);
 }
 
 #ifdef CONFIG_SOC_IMX28
@@ -744,16 +744,7 @@ static inline void imx28_ehci_writel(const unsigned int val,
 static inline void ehci_writel(const struct ehci_hcd *ehci,
 		const unsigned int val, __u32 __iomem *regs)
 {
-#ifdef CONFIG_USB_EHCI_BIG_ENDIAN_MMIO
-	ehci_big_endian_mmio(ehci) ?
-		writel_be(val, regs) :
-		writel(val, regs);
-#else
-	if (ehci->imx28_write_fix)
-		imx28_ehci_writel(val, regs);
-	else
-		writel(val, regs);
-#endif
+	xsilon_ehci_writel(ehci, val, regs);
 }
 
 /*
