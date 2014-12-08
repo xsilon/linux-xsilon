@@ -180,6 +180,7 @@ die() {
 }
 
 oe_runmake_call() {
+	sed -i "s|CONFIG_LOCALVERSION_AUTO=.*|CONFIG_LOCALVERSION_AUTO=n|" .config
 	bbnote make -j 8  "$@"
 	make -j 8 LOCALVERSION= "$@"
 	make -j 8 LOCALVERSION= modules
