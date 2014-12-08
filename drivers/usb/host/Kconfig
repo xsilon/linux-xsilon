@@ -98,7 +98,7 @@ config USB_FSL_MPH_DR_OF
 
 config USB_EHCI_XSILON
 	bool "Use Xsilon usb host EHCI controller core"
-	default y
+	default n
 	---help---
 		Xsilon USB host controller core is EHCI compilant and has
 		transaction translator built-in. It can be configured to either
