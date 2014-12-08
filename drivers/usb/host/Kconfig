@@ -95,6 +95,16 @@ config USB_EHCI_TT_NEWSCHED
 config USB_FSL_MPH_DR_OF
 	tristate
 
+
+config USB_EHCI_XSILON
+	bool "Use Xsilon usb host EHCI controller core"
+	default y
+	---help---
+		Xsilon USB host controller core is EHCI compilant and has
+		transaction translator built-in. It can be configured to either
+		support both high speed and full speed devices, or high speed
+		devices only.
+
 if USB_EHCI_HCD
 
 config USB_EHCI_PCI
@@ -119,17 +129,6 @@ config XPS_USB_HCD_XILINX
 	select USB_EHCI_BIG_ENDIAN_MMIO
 	---help---
 		Xilinx xps USB host controller core is EHCI compilant and has
-		transaction translator built-in. It can be configured to either
-		support both high speed and full speed devices, or high speed
-		devices only.
-
-config USB_HCD_XSILON
-	bool "Use Xsilon usb host EHCI controller core"
-	default y
-	depends on (MICROBLAZE)
-	select USB_EHCI_ROOT_HUB_TT
-	---help---
-		Xsilon USB host controller core is EHCI compilant and has
 		transaction translator built-in. It can be configured to either
 		support both high speed and full speed devices, or high speed
 		devices only.
