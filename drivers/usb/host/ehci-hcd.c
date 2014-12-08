@@ -1321,6 +1321,11 @@ MODULE_LICENSE ("GPL");
 #define PLATFORM_DRIVER		ehci_zynq_driver
 #endif
 
+#ifdef CONFIG_USB_EHCI_ZYNQ
+#include "ehci-zynq.c"
+#define PLATFORM_DRIVER		ehci_zynq_driver
+#endif
+
 #ifdef CONFIG_USB_OCTEON_EHCI
 #include "ehci-octeon.c"
 #define PLATFORM_DRIVER		ehci_octeon_driver
