@@ -108,7 +108,7 @@ static int ssd1307fb_write_array(struct spi_device *client,
 	len += sizeof(struct ssd1307fb_array);
 
 	ret = spi_write(client, (u8 *)array, len);
-	if (ret != len) {
+	if (ret < 0) {
 		dev_err(&client->dev, "Couldn't send SPI command.\n");
 		return ret;
 	}
