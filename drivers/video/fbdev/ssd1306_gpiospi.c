@@ -396,25 +396,36 @@ static int ssd1307fb_ssd1306_init(struct ssd1307fb_par *par)
 	msleep(1);
 	gpio_set_value(par->iRES, 1);
 
-	/* Turn on the DC-DC Charge Pump */
-	ret = ssd1307fb_write_cmd(par, SSD1307FB_CHARGE_PUMP);
-	ret = ret & ssd1307fb_write_cmd(par, 0x14);
-	if (ret < 0)
-		return ret;
-
-	/* Set precharge period in number of ticks from the internal clock */
-	ret = ssd1307fb_write_cmd(par, SSD1307FB_SET_PRECHARGE_PERIOD);
-	ret = ret & ssd1307fb_write_cmd(par, 0xF1);
-	if (ret < 0)
-		return ret;
-
 	/* Turn on VCC and wait 100ms */
 	gpio_set_value(par->iVBAT, 0);
 	msleep(100);
 
-	/* Set initial contrast */
-	ret = ssd1307fb_write_cmd(par, SSD1307FB_CONTRAST);
-	ret = ret & ssd1307fb_write_cmd(par, 0x0f);
+	/* Set clock frequency */
+	/*ret = ssd1307fb_write_cmd(par, SSD1307FB_SET_CLOCK_FREQ);
+	ret = ret & ssd1307fb_write_cmd(par, 0x80);
+	if (ret < 0)
+		return ret;*/
+
+	/* Set multiplex ratio value */
+	/*ret = ssd1307fb_write_cmd(par, SSD1307FB_SET_MULTIPLEX_RATIO);
+	ret = ret & ssd1307fb_write_cmd(par, par->height - 1);
+	if (ret < 0)
+		return ret;*/
+
+	/* set display offset value */
+	/*ret = ssd1307fb_write_cmd(par, SSD1307FB_SET_DISPLAY_OFFSET);
+	ret = ssd1307fb_write_cmd(par, 0x0);
+	if (ret < 0)
+		return ret;*/
+
+	/* set display start line */
+	/*ret = ssd1307fb_write_cmd(par, 0x40);
+	if (ret < 0)
+		return ret;*/
+
+	/* Turn on the DC-DC Charge Pump */
+	ret = ssd1307fb_write_cmd(par, SSD1307FB_CHARGE_PUMP);
+	ret = ret & ssd1307fb_write_cmd(par, 0x14);
 	if (ret < 0)
 		return ret;
 
@@ -431,14 +442,54 @@ static int ssd1307fb_ssd1306_init(struct ssd1307fb_par *par)
 	/* Set COM pins configuration */
 	ret = ssd1307fb_write_cmd(par, SSD1307FB_SET_COM_PINS_CONFIG);
 	ret = ret & ssd1307fb_write_cmd(par, 0x00);
-	ret = ret & ssd1307fb_write_cmd(par, 0xC0);
+	if (ret < 0)
+		return ret;
+
+	/* Set initial contrast */
+	ret = ssd1307fb_write_cmd(par, SSD1307FB_CONTRAST);
+	ret = ret & ssd1307fb_write_cmd(par, 0xaf);
+	if (ret < 0)
+		return ret;
+
+	/* Set precharge period in number of ticks from the internal clock */
+	ret = ssd1307fb_write_cmd(par, SSD1307FB_SET_PRECHARGE_PERIOD);
+	ret = ret & ssd1307fb_write_cmd(par, 0xF1);
+	if (ret < 0)
+		return ret;
+
+	/* Set VCOMH */
+	ret = ssd1307fb_write_cmd(par, SSD1307FB_SET_VCOMH);
+	ret = ret & ssd1307fb_write_cmd(par, 0x20);
 	if (ret < 0)
 		return ret;
 
 	/* Switch to horizontal addressing mode */
 	ret = ssd1307fb_write_cmd(par, SSD1307FB_SET_ADDRESS_MODE);
 	ret = ret & ssd1307fb_write_cmd(par,
-				SSD1307FB_SET_ADDRESS_MODE_HORIZONTAL);
+					SSD1307FB_SET_ADDRESS_MODE_HORIZONTAL);
+	if (ret < 0)
+		return ret;
+
+		/*ret = ssd1307fb_write_cmd(par, SSD1307FB_SET_COL_RANGE);
+		ret = ret & ssd1307fb_write_cmd(par, 0x0);
+		ret = ret & ssd1307fb_write_cmd(par, par->width - 1);
+		if (ret < 0)
+			return ret;
+
+		ret = ssd1307fb_write_cmd(par, SSD1307FB_SET_PAGE_RANGE);
+		ret = ret & ssd1307fb_write_cmd(par, 0x0);
+		ret = ret & ssd1307fb_write_cmd(par,
+						par->page_offset + (par->height / 8) - 1);
+		if (ret < 0)
+			return ret;*/
+
+	/* Set Entire display on/off */
+	ret = ssd1307fb_write_cmd(par, 0xa4);
+	if (ret < 0)
+		return ret;
+
+	/* Set normal */
+	ret = ssd1307fb_write_cmd(par, 0xa6);
 	if (ret < 0)
 		return ret;
 
@@ -446,53 +497,6 @@ static int ssd1307fb_ssd1306_init(struct ssd1307fb_par *par)
 	ret = ssd1307fb_write_cmd(par, SSD1307FB_DISPLAY_ON);
 	if (ret < 0)
 		return ret;
-
-
-
-
-
-
-
-
-
-
-	/* Set multiplex ratio value */
-	/*ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_MULTIPLEX_RATIO);
-	ret = ret & ssd1307fb_write_cmd(par->client, par->height - 1);
-	if (ret < 0)
-		return ret;*/
-
-	/* set display offset value */
-	/*ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_DISPLAY_OFFSET);
-	ret = ssd1307fb_write_cmd(par->client, 0x20);
-	if (ret < 0)
-		return ret;*/
-
-	/* Set clock frequency */
-	/*ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_CLOCK_FREQ);
-	ret = ret & ssd1307fb_write_cmd(par->client, 0xf0);
-	if (ret < 0)
-		return ret;*/
-
-
-	/* Set VCOMH */
-	/*ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_VCOMH);
-	ret = ret & ssd1307fb_write_cmd(par->client, 0x49);
-	if (ret < 0)
-		return ret;
-
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_COL_RANGE);
-	ret = ret & ssd1307fb_write_cmd(par->client, 0x0);
-	ret = ret & ssd1307fb_write_cmd(par->client, par->width - 1);
-	if (ret < 0)
-		return ret;
-
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_PAGE_RANGE);
-	ret = ret & ssd1307fb_write_cmd(par->client, 0x0);
-	ret = ret & ssd1307fb_write_cmd(par->client,
-					par->page_offset + (par->height / 8) - 1);
-	if (ret < 0)
-		return ret;*/
 
 	return 0;
 }
@@ -683,6 +687,7 @@ static int ssd1306_gpio_of_probe(struct platform_device *pdev)
 	gpio_pmodoled_pdev->dev.platform_data = spi_gpio_pdata;
 	par->pdev = gpio_pmodoled_pdev;
 
+
 	/* Register spi_gpio master */
 	status = platform_device_register(par->pdev);
 	if (status < 0) {
@@ -730,7 +735,7 @@ static int ssd1306_gpio_of_probe(struct platform_device *pdev)
 		par->width = 128;
 
 	if (of_property_read_u32(node, "solomon,height", &par->height))
-		par->height = 16;
+		par->height = 32;
 
 	if (of_property_read_u32(node, "solomon,page-offset", &par->page_offset))
 		par->page_offset = 1;
@@ -769,10 +774,10 @@ static int ssd1306_gpio_of_probe(struct platform_device *pdev)
 	fb_deferred_io_init(info);
 
 	/* Reset the screen */
-	gpio_set_value(par->iRES, 0);
+	/*gpio_set_value(par->iRES, 0);
 	udelay(4);
 	gpio_set_value(par->iRES, 1);
-	udelay(4);
+	udelay(4);*/
 
 	ret = ssd1307fb_ssd1306_init(par);
 	if (ret)
