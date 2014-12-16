@@ -628,7 +628,7 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 				 * buffer in this case.  Strictly speaking this
 				 * is a violation of the spec.
 				 */
-				if (last_status != -EPIPE);
+				if (last_status != -EPIPE)
 					ft313_clear_tt_buffer(ft313, qh, urb,
 							token);
 			}

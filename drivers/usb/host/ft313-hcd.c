@@ -136,16 +136,29 @@ static inline u16 _ft313_reg_read16(const struct ft313_hcd *ft313,
 	u32 offset;
 	u32 val;
 	__u32 __iomem * baseaddr = (__u32 __iomem *)g_regbase;
-	unsigned long flags = 0;
+//	unsigned long flags = 0;
 
 	offset = (void *)regs - (void *)baseaddr;
 
-	safe_spin_lock((spinlock_t *)&ft313->reg_lock, &flags);
+
+//	safe_spin_lock((spinlock_t *)&ft313->reg_lock, &flags);
+#ifdef INDIRECT_MEMORY_ADDRESSING
 	iowrite32(offset, baseaddr);
 	iowrite32(1, baseaddr + 3);
 	iowrite32(0, baseaddr + 3);
- 	safe_spin_unlock((spinlock_t *)&ft313->reg_lock, &flags);
 	val = (u32)ioread32(baseaddr + 4);
+#else
+	iowrite32(offset | 0x40000000, baseaddr);
+	while(ioread32(baseaddr+2) & 0x01)
+		;
+
+/* {
+		printk(KERN_NOTICE ".");
+		mdelay(500);
+	} */
+	val = (u32)ioread32(baseaddr + 1);
+#endif
+// 	safe_spin_unlock((spinlock_t *)&ft313->reg_lock, &flags);
 
 	return (u16)val;
 }
@@ -155,15 +168,27 @@ static inline void _ft313_reg_write16(const struct ft313_hcd *ft313, u16 val,
 {
 	u32 offset;
 	__u32 __iomem * baseaddr = (__u32 __iomem *)g_regbase;
-	unsigned long flags = 0;
+//	unsigned long flags = 0;
 
 	offset = (void *)regs - (void *)baseaddr;
 
-	safe_spin_lock((spinlock_t *)&ft313->reg_lock, &flags);
+
+//	safe_spin_lock((spinlock_t *)&ft313->reg_lock, &flags);
+#ifdef INDIRECT_MEMORY_ADDRESSING
 	iowrite32(offset | ((val & 0xffff) << 16), baseaddr);
 	iowrite32(1, baseaddr + 2);
 	iowrite32(0, baseaddr + 2);
-	safe_spin_unlock((spinlock_t *)&ft313->reg_lock, &flags);
+#else
+	iowrite32(offset | 0x80000000 | (u32)val << 8, baseaddr);
+	while(ioread32(baseaddr+2) & 0x01)
+		;
+
+/* {
+		printk(KERN_NOTICE ".");
+		mdelay(500);
+	}*/
+#endif
+//	safe_spin_unlock((spinlock_t *)&ft313->reg_lock, &flags);
 }
 
 static inline u16 ft313_reg_read16(const struct ft313_hcd *ft313,
@@ -232,7 +257,13 @@ void ft313_mem_read(struct ft313_hcd *ft313, void *buf, u16 length, u16 offset)
 	unsigned long flags = 0;
 
 	if (NULL == buf) {
-		printk("Null buffer used as destination address!\n");
+		ALERT_MSG("Null buffer used as destination address!\n");
+		return;
+	}
+
+	if (offset + length > FT313_CHIP_MEM_AMT) {
+		ALERT_MSG("Memory request out of range\n");
+		BUG();
 		return;
 	}
 
@@ -254,7 +285,9 @@ void ft313_mem_read(struct ft313_hcd *ft313, void *buf, u16 length, u16 offset)
 	{
 		if (0 != (length % 2)) length++; // Software need to adjust length
 		ft313_reg_write16(ft313, 0x8000 | length, &ft313->cfg->data_session_len); //Set direction as read
+		wmb();
 		ft313_reg_write16(ft313, offset, &ft313->cfg->mem_addr);
+		mb();
 
 		for (i = 0; i < length; i += 2)
 			*((u16*)(buf + i)) = _ft313_reg_read16(ft313, &ft313->cfg->data_port);
@@ -282,6 +315,13 @@ void ft313_mem_write(struct ft313_hcd *ft313, void *buf, u16 length, u16 offset)
 	int i;
 	unsigned long flags = 0;
 
+
+	if (offset + length > FT313_CHIP_MEM_AMT) {
+		ALERT_MSG("Memory request out of range\n");
+		BUG();
+		return;
+	}
+
 	if (in_interrupt()) {
 		spin_lock(&ft313->dataport_lock);
 	} else {
@@ -292,7 +332,9 @@ void ft313_mem_write(struct ft313_hcd *ft313, void *buf, u16 length, u16 offset)
 #ifdef FT313_IN_8_BIT_MODE
 	{ // 8 bit mode
 		ft313_reg_write16(ft313, length, &ft313->cfg->data_session_len);
+		wmb();
 		ft313_reg_write16(ft313, offset, &ft313->cfg->mem_addr);
+		wmb();
 		for (i = 0; i < length; i++)
 			iowrite8(*((u8*)(buf + i)), &ft313->cfg->data_port);
 	}
@@ -300,8 +342,9 @@ void ft313_mem_write(struct ft313_hcd *ft313, void *buf, u16 length, u16 offset)
 	{
 		if (0 != (length % 2)) length++; // Software need to adjust length
 		ft313_reg_write16(ft313, length, &ft313->cfg->data_session_len);
+		wmb();
 		ft313_reg_write16(ft313, offset, &ft313->cfg->mem_addr);
-
+		wmb();
 
 		for (i = 0; i < length; i += 2)
 			_ft313_reg_write16(ft313, *((u16*)(buf + i)), &ft313->cfg->data_port);
@@ -1275,11 +1318,6 @@ another_int_generated:
 	cmd = ft313_reg_read32(ft313, &ft313->regs->command);
 	bh = 0;
 
-#ifdef	VERBOSE_DEBUG
-	/* unrequested/ignored: Frame List Rollover */
-	dbg_status (ft313, "irq", status);
-#endif
-
 	/* INT, ERR, and IAA interrupt rates can be throttled */
 
 	/* normal [4.15.1.2] or error [4.15.1.1] completion */
@@ -1311,7 +1349,7 @@ another_int_generated:
 	if (status & PO_CHG_DET) {
 		unsigned	i = HCS_N_PORTS (ft313->hcs_params);
 
-		ALERT_MSG("Got port status change interrupt (%d)\n", i);
+		DEBUG_MSG("Got port status change interrupt\n");
 
 		/* kick root hub later */
 		pcd_status = status;
@@ -1326,15 +1364,13 @@ another_int_generated:
 			pstatus = ft313_reg_read32(ft313,
 					 &ft313->regs->port_status[i]);
 
-			ALERT_MSG("Port status reg is 0x%X\n", pstatus);
+//			ALERT_MSG("Port status reg is 0x%X\n", pstatus);
 
 			if (pstatus & CONN_STS)
-				ALERT_MSG("Device plugged in\n");
+				printk(KERN_ALERT "Device plugged into FT313H root hub \n");
 			else
-				ALERT_MSG("Device removed \n");
+				printk(KERN_ALERT "Device removed from FT313H root hub \n");
 
-//			if (pstatus & PORT_OWNER)
-//				continue;
 			if (!(test_bit(i, &ft313->suspended_ports)		&&
 			      ((pstatus & F_PO_RESM) || !(pstatus & PO_SUSP))   &&
 			      (pstatus & PO_EN) &&
@@ -1346,9 +1382,9 @@ another_int_generated:
 			 * stop that signaling.  Use 5 ms extra for safety,
 			 * like usb_port_resume() does.
 			 */
-			ALERT_MSG("Set resume timer\n");
+			DEBUG_MSG("Set resume timer\n");
 			ft313->reset_done[i] = jiffies + msecs_to_jiffies(25);
-			ALERT_MSG("port %d remote wakeup\n", i + 1);
+			DEBUG_MSG("port %d remote wakeup\n", i + 1);
 			mod_timer(&hcd->rh_timer, ft313->reset_done[i]);
 		}
 
@@ -1357,12 +1393,9 @@ another_int_generated:
 	/* PCI errors [4.15.2.4] */
 	if (unlikely ((status & H_SYSERR) != 0)) {
 		ALERT_MSG("fatal error\n");
-		//dbg_cmd(ft313, "fatal", cmd);
-		//dbg_status(ft313, "fatal", status);
 		ft313_halt(ft313);
 dead:
 		ft313_reset(ft313);
-//		ft313_reg_write32(ft313, 0, &ft313->regs->configured_flag);
 		usb_hc_died(hcd);
 		/* generic layer kills/unlinks all urbs, then
 		 * uses ehci_stop to clean up the rest
@@ -1372,9 +1405,6 @@ dead:
 
 	if (bh)
 		ft313_work (ft313);
-//	spin_unlock (&ft313->lock);
-//	if (pcd_status)
-//		usb_hcd_poll_rh_status(hcd);
 
 // Interrupt workaround start
 #if 1
@@ -1424,7 +1454,8 @@ static int ft313_urb_enqueue (
 	struct ehci_qh		*qh;
 	struct ehci_iso_stream	*stream;
 
-	int val;
+	int val, rc = 0;
+	unsigned long flags;
 
 	FUN_ENTRY();
 
@@ -1442,10 +1473,13 @@ static int ft313_urb_enqueue (
 		if (qh != NULL) {
 			struct qh_urb_queue_item *qh_urb_q_item;
 
+			spin_lock_irqsave(&ft313->lock, flags);
+
 			if (qh->urb != NULL) { // There is still urb pending
 				DEBUG_MSG("Current pending urb for qH 0x%08X is 0x%p, have to Q new urb 0x%p\n", qh->qh_ft313, qh->urb, urb);
 				qh_urb_q_item = kmalloc(sizeof(struct qh_urb_queue_item), mem_flags);
 				if (NULL == qh_urb_q_item) {
+					spin_unlock_irqrestore(&ft313->lock, flags);
 					FUN_EXIT();
 					return -ENOMEM;
 				}
@@ -1460,10 +1494,17 @@ static int ft313_urb_enqueue (
 					kfree(qh_urb_q_item);
 					ALERT_MSG("urb 0x%p restored for qH 0x%08x (0x%p)\n", urb, qh->qh_ft313, qh);
 				} else {
+					// Link URB to EP early for cancllation
+					rc = usb_hcd_link_urb_to_ep(hcd, urb);
+					if (0 != rc)
+						ALERT_MSG("Link URB to EP failed for queuing\n");
+					spin_unlock_irqrestore(&ft313->lock, flags);
 					FUN_EXIT();
-					return 0;
+					return rc;
 				}
 			}
+
+			spin_unlock_irqrestore(&ft313->lock, flags);
 		}
 
 	} else if (usb_pipetype (urb->pipe) == PIPE_ISOCHRONOUS) { // queue for iso transfer
