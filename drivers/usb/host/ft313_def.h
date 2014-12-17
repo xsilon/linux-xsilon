@@ -12,9 +12,12 @@
 //#define PORT_RESET_TIME_WORKAROUND
 //#define USB_SOF_INTR
 #ifndef USB_SOF_INTR
-#ifdef CONFIG_PCI
-#define PCI_ENABLE_MSI
-#endif
+#  ifdef CONFIG_PCI
+#    define PCI_ENABLE_MSI
+#  endif
+#  define FT313_INTR_MASK		(OCINT_EN)
+#else
+#  define FT313_INTR_MASK		(OCINT_EN | SOFINT_EN)
 #endif
 
 //#define ENABLE_DYN_UNLINK

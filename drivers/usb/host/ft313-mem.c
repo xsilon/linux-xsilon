@@ -56,22 +56,46 @@ display_mm_status(struct ft313_hcd *ft313, int in_use_only)
 
 	blk = ft313->mem;
 
-	for (i =0; i < ft313->mem_blk_num; i++)
-	{
-		if (in_use_only == TRUE)
-		{
+	for (i =0; i < ft313->mem_blk_num; i++) {
+		if (in_use_only == TRUE) {
 			if (blk->in_use == TRUE)
 					DEBUG_MSG("No.%2d. type is %s, size is %d, offset at 0x%04X\n",
 							i, get_name_by_type(blk->type), blk->size, blk->offset);
-		}
-		else
-		{
+		} else {
 			DEBUG_MSG("No.%2d. status is %s, type is %s, size is %d, offset at 0x%04X\n",
 					i, ((blk->in_use == TRUE)? "in use": "not in use"), get_name_by_type(blk->type), blk->size, blk->offset);
-
 		}
 
 		blk++;
+	}
+
+	blk--; // restore to the last block
+	DEBUG_MSG("Reminding free memory is %d bytes\n", FT313_CHIP_MEM_AMT - (blk->offset + blk->size));
+}
+
+void display_qh_status(struct ft313_hcd *ft313, int in_use_only)
+		{
+	struct ft313_mem_blk *blk;
+	int i;
+
+	blk = ft313->mem;
+
+	for (i =0; i < ft313->mem_blk_num; i++) {
+		if (in_use_only == TRUE) {
+			if (blk->in_use == TRUE && blk->type == QHEAD)
+				DEBUG_MSG("No.%2d. type is %s, size is %d, offset at 0x%04X\n",
+					  i, get_name_by_type(blk->type), blk->size, blk->offset);
+		} else {
+			if (blk->type == QHEAD)
+			DEBUG_MSG("No.%2d. status is %s, type is %s, size is %d, offset at 0x%04X\n",
+					i, ((blk->in_use == TRUE)? "in use": "not in use"), get_name_by_type(blk->type), blk->size, blk->offset);
+		}
+
+		blk++;
+
+		if (blk->type != QHEAD)
+			break;
+
 	}
 }
 
@@ -148,13 +172,10 @@ struct ft313_mem_blk* allocate_mem_blk(struct ft313_hcd *ft313, unsigned type, u
 
 	safe_spin_lock(&ft313->mem_lock, &flags);
 
-	if (type != BUFFER) // Allocate discriptor
-	{
-		for (i = 0; i < ft313->mem_blk_num; i++)
-		{
-			if (current_blk->type == type && current_blk->in_use == 0)
-			{
-				current_blk->in_use = 1;
+	if (type != BUFFER) {// Allocate discriptor
+		for (i = 0; i < ft313->mem_blk_num; i++) {
+			if (current_blk->type == type && current_blk->in_use == FALSE) {
+				current_blk->in_use = TRUE;
 				safe_spin_unlock(&ft313->mem_lock, &flags);
 				return current_blk;
 			}
@@ -162,22 +183,16 @@ struct ft313_mem_blk* allocate_mem_blk(struct ft313_hcd *ft313, unsigned type, u
 			current_blk++;
 		}
 		safe_spin_unlock(&ft313->mem_lock, &flags);
+
 		return NULL;
-	}
-	else // Allocate memory
-	{
-		for (i = 0; i < ft313->mem_blk_num; i++)
-		{
-			if (current_blk->type == type && current_blk->in_use == 0)
-			{
-				if (size <= current_blk->size)
-				{
-					current_blk->in_use = 1;
+	} else { // Allocate memory
+		for (i = 0; i < ft313->mem_blk_num; i++) {
+			if (current_blk->type == type && current_blk->in_use == FALSE) {
+				if (size <= current_blk->size) {
+					current_blk->in_use = TRUE;
 					safe_spin_unlock(&ft313->mem_lock, &flags);
 					return current_blk;
-				}
-				else
-				{
+				} else {
 					curr_available_blk = current_blk;
 				}
 			}
@@ -186,11 +201,10 @@ struct ft313_mem_blk* allocate_mem_blk(struct ft313_hcd *ft313, unsigned type, u
 		}
 
 		if (curr_available_blk != NULL)
-			curr_available_blk->in_use = 1;
+			curr_available_blk->in_use = TRUE;
 		safe_spin_unlock(&ft313->mem_lock, &flags);
 		return curr_available_blk; // return the last avaialble as it has largest size or NULL
 	}
-
 }
 
 int free_mem_blk(struct ft313_hcd *ft313, unsigned offset)
@@ -207,7 +221,7 @@ int free_mem_blk(struct ft313_hcd *ft313, unsigned offset)
 	{
 		if (current_blk[i].offset == offset)
 		{
-			current_blk[i].in_use = 0;
+			current_blk[i].in_use = FALSE;
 			ret = 0;
 			break;
 		}
@@ -251,9 +265,7 @@ static inline void ft313_qtd_init(struct ft313_hcd *ft313, struct ehci_qtd *qtd,
 	qtd->hw_next = EHCI_LIST_END(ft313);
 	qtd->hw_alt_next = EHCI_LIST_END(ft313);
 	INIT_LIST_HEAD (&qtd->qtd_list);
-	// FixMe: is this really needed?
-	// Yes: what if only modify certain elements from SW?
-	// No: there will always be a full copy when first time using the qtd.
+
 	DEBUG_MSG("Init qTD content\n");
 	ft313_mem_write(ft313, qtd, sizeof(struct ehci_qtd_hw), qtd->qtd_ft313);
 }
@@ -267,8 +279,12 @@ static struct ehci_qtd *ft313_qtd_alloc (struct ft313_hcd *ft313, gfp_t flags)
 	mem_blk_ptr = allocate_mem_blk(ft313, QTD, 0);
 	if (mem_blk_ptr == NULL)
 		return NULL;
-
+#ifdef DMA_DEVICE
 	qtd = dma_pool_alloc (ft313->qtd_pool, flags, &dma);
+#else
+	qtd = kmalloc(sizeof(struct ehci_qtd), GFP_DMA | GFP_ATOMIC);
+	dma = virt_to_phys(qtd);
+#endif
 	if (qtd != NULL) {
 		qtd->qtd_ft313 = mem_blk_ptr->offset;
 		ft313_qtd_init(ft313, qtd, dma);
@@ -276,7 +292,7 @@ static struct ehci_qtd *ft313_qtd_alloc (struct ft313_hcd *ft313, gfp_t flags)
 	}
 	else {
 		if (NULL != mem_blk_ptr)
-			mem_blk_ptr->in_use = 0;
+			mem_blk_ptr->in_use = FALSE;
 	}
 
 	return qtd;
@@ -303,9 +319,11 @@ static inline void ft313_qtd_free (struct ft313_hcd *ft313, struct ehci_qtd *qtd
 	else {
 		DEBUG_MSG("qTD 0x%X is freed\n", qtd->qtd_ft313);
 	}
-
+#ifdef DMA_DEVICE
 	dma_pool_free (ft313->qtd_pool, qtd, qtd->qtd_dma);
-
+#else
+	kfree(qtd);
+#endif
 	FUN_EXIT();
 }
 
@@ -329,8 +347,11 @@ static void qh_destroy(struct ehci_qh *qh)
 		BUG();
 	}
 	DEBUG_MSG("qH at 0x%X is freed\n", qh->qh_ft313);
+#ifdef DMA_DEVICE
 	dma_pool_free(ft313->qh_pool, qh->hw, qh->qh_dma);
-
+#else
+	kfree(qh->hw);
+#endif
 	kfree(qh);
 
 	FUN_EXIT();
@@ -346,13 +367,20 @@ static struct ehci_qh *ft313_qh_alloc(struct ft313_hcd *ft313, gfp_t flags)
 	qh = kzalloc(sizeof *qh, GFP_ATOMIC);
 	if (!qh)
 		goto done;
+#ifdef DMA_DEVICE
 	qh->hw = (struct ehci_qh_hw *)
 		dma_pool_alloc(ft313->qh_pool, flags, &dma);
+#else
+       qh->hw = kmalloc(sizeof(struct ehci_qh_hw), GFP_DMA | GFP_ATOMIC);
+       dma = virt_to_phys(qh->hw);
+#endif
+	if (!qh->hw)
+		goto fail2;
 
 	mem_blk_ptr = allocate_mem_blk(ft313, QHEAD, 0);
 
-	if (!qh->hw || !mem_blk_ptr)
-		goto fail;
+	if (!mem_blk_ptr)
+		goto fail1;
 	memset(qh->hw, 0, sizeof *qh->hw);
 	DEBUG_MSG("Init qH content\n");
 	ft313_mem_write(ft313, qh->hw, sizeof(struct ehci_qh_hw), mem_blk_ptr->offset);
@@ -368,17 +396,24 @@ static struct ehci_qh *ft313_qh_alloc(struct ft313_hcd *ft313, gfp_t flags)
 	DEBUG_MSG("Create a dummy qTD for qH at 0x%04X\n", qh->qh_ft313);
 	qh->dummy = ft313_qtd_alloc (ft313, flags);
 	if (qh->dummy == NULL) {
-//		ehci_dbg (ehci, "no dummy td\n");
-		goto fail1;
+		goto fail;
 	}
 done:
 	return qh;
-fail1:
-	dma_pool_free(ft313->qh_pool, qh->hw, qh->qh_dma);
+
 fail:
-	kfree(qh);
 	if (mem_blk_ptr)
-		mem_blk_ptr->in_use = 0;
+		mem_blk_ptr->in_use = FALSE;
+fail1:
+#ifdef DMA_DEVICE
+	dma_pool_free(ft313->qh_pool, qh->hw, dma);
+#else
+	kfree(qh->hw);
+#endif
+
+fail2:
+	kfree(qh);
+
 	return NULL;
 }
 
@@ -395,6 +430,7 @@ static inline void qh_put (struct ehci_qh *qh)
 {
 	if (!--qh->refcount) {
 		qh_destroy(qh);
+		DEBUG_MSG("qh 0x%X refcount is %d\n and should be removed!", qh->qh_ft313, qh->refcount);
 	}
 	else {
 		DEBUG_MSG("qH 0x%X refcount is %d\n", qh->qh_ft313, qh->refcount);
@@ -416,16 +452,16 @@ static void ft313_mem_cleanup (struct ft313_hcd *ft313)
 
 	free_cached_lists(ft313); //FixMe: for isochronous support!
 
-	if (ft313->async)
+	if (ft313->async) {
+		if (NULL != ft313->async->qh_next.qh) {
+			ERROR_MSG("There is still qH 0x%X pending\n", ft313->async->qh_next.qh->qh_ft313);
+		}
 		qh_put (ft313->async);
+	}
 	ft313->async = NULL;
 
-#if 0
-	if (ft313->dummy)
-		qh_put(ft313->dummy);
-	ft313->dummy = NULL;
-#endif
 	/* DMA consistent memory and pools */
+#ifdef DMA_DEVICE
 	if (ft313->qtd_pool)
 		dma_pool_destroy (ft313->qtd_pool);
 	ft313->qtd_pool = NULL;
@@ -442,9 +478,10 @@ static void ft313_mem_cleanup (struct ft313_hcd *ft313)
 	if (ft313->sitd_pool)
 		dma_pool_destroy (ft313->sitd_pool);
 	ft313->sitd_pool = NULL;
+#endif
 
 	if (ft313->periodic)
-#ifndef TI_PLAT_WORKAROUND
+#ifdef DMA_DEVICE
 		dma_free_coherent (ft313_to_hcd(ft313)->self.controller,
 			ft313->periodic_size * sizeof (u32),
 			ft313->periodic, ft313->periodic_dma);
@@ -477,8 +514,7 @@ int ft313_mem_init(struct ft313_hcd *ft313, gfp_t flags)
 	spin_lock_init(&ft313->mem_lock);
 	spin_lock_init(&ft313->dataport_lock);
 
-	ALERT_MSG("Create DMA Pool for qTD start\n");
-
+#ifdef DMA_DEVICE
 	/* QTDs for control/bulk/intr transfers */
 	ft313->qtd_pool = dma_pool_create ("ft313_qtd",
 			ft313_to_hcd(ft313)->self.controller,
@@ -489,8 +525,6 @@ int ft313_mem_init(struct ft313_hcd *ft313, gfp_t flags)
 		goto fail;
 	}
 
-	ALERT_MSG("Create DMA Pool for qTD end\n");
-#if 1	// Disable only for irq test
 	/* QHs for control/bulk/intr transfers */
 	ft313->qh_pool = dma_pool_create ("ft313_qh",
 			ft313_to_hcd(ft313)->self.controller,
@@ -500,13 +534,13 @@ int ft313_mem_init(struct ft313_hcd *ft313, gfp_t flags)
 	if (!ft313->qh_pool) {
 		goto fail;
 	}
+#endif
+
 	ft313->async = ft313_qh_alloc(ft313, flags);
 	if (!ft313->async) {
 		goto fail;
 	}
-
-	ALERT_MSG("Create DMA Pool for qH end\n");
-
+#ifdef DMA_DEVICE
 	/* ITD for high speed ISO transfers */
 	ft313->itd_pool = dma_pool_create ("ft313_itd",
 			ft313_to_hcd(ft313)->self.controller,
@@ -528,59 +562,26 @@ int ft313_mem_init(struct ft313_hcd *ft313, gfp_t flags)
 	if (!ft313->sitd_pool) {
 		goto fail;
 	}
-	ALERT_MSG("Create DMA Pool for siTD end\n");
 #endif
 	/* Hardware periodic table */
-#ifndef TI_PLAT_WORKAROUND
+#ifdef DMA_DEVICE
 	ft313->periodic = (__le32 *)
 		dma_alloc_coherent (ft313_to_hcd(ft313)->self.controller,
 			ft313->periodic_size * sizeof(__le32),
 			&ft313->periodic_dma, 0);
 #else
-	// Workaournd for TI ARM platfomr
-	ft313->periodic = kmalloc(ft313->periodic_size * sizeof(__le32), GFP_DMA);
+	ft313->periodic = (__le32 *)kmalloc(ft313->periodic_size * sizeof(__le32), GFP_DMA);
+	ft313->periodic_dma = virt_to_phys(ft313->periodic);
 #endif
 	if (ft313->periodic == NULL) {
 		goto fail;
 	}
-#ifdef TI_PLAT_WORKAROUND
-	ft313->periodic_dma = virt_to_bus(ft313->periodic);
-#endif
 
-/*
-	if (ft313->use_dummy_qh) {
-		struct ehci_qh_hw	*hw;
-		ft313->dummy = ehci_qh_alloc(ft313, flags);
-		if (!ft313->dummy)
-			goto fail;
-
-		hw = ft313->dummy->hw;
-		hw->hw_next = EHCI_LIST_END(ft313);
-		hw->hw_qtd_next = EHCI_LIST_END(ft313);
-		hw->hw_alt_next = EHCI_LIST_END(ft313);
-		hw->hw_token &= ~QTD_STS_ACTIVE;
-		ft313->dummy->hw = hw;
-
-		for (i = 0; i < ft313->periodic_size; i++)
-			ft313->periodic[i] = ft313->dummy->qh_dma;
-	} else
-*/
-	{
-		for (i = 0; i < ft313->periodic_size; i++)
-			ft313->periodic[i] = EHCI_LIST_END(ft313);
-		// FixMe: The offset of periodic list base is hard-coded as ZERO now!
-		ft313->periodic_ft313 = 0;
-		ft313_mem_write(ft313, ft313->periodic, ft313->periodic_size * sizeof(__le32), ft313->periodic_ft313);
-
-		{
-			int i;
-			u32 buf[16];
-			ft313_mem_read(ft313, buf, 16*4, 0);
-			for (i = 0; i < 16*4; i += 4) {
-				printk("%08X\n", *(u32*)(buf + i));
-			}
-		}
-	}
+	for (i = 0; i < ft313->periodic_size; i++)
+		ft313->periodic[i] = EHCI_LIST_END(ft313);
+	// The offset of periodic list base is set as ZERO
+	ft313->periodic_ft313 = 0;
+	ft313_mem_write(ft313, ft313->periodic, ft313->periodic_size * sizeof(__le32), ft313->periodic_ft313);
 
 	/* software shadow of hardware table */
 	ft313->pshadow = kcalloc(ft313->periodic_size, sizeof(void *), flags);

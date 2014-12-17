@@ -249,6 +249,81 @@ static void ft313_clear_tt_buffer(struct ft313_hcd *ft313, struct ehci_qh *qh,
 	FUN_EXIT();
 }
 
+static int urb_copy_sglist_buffer(struct urb *urb)
+{
+	void *buf, *buffer;
+	int length = 0, len = 0, retval = 0, offset = 0;
+	struct scatterlist *sg;
+	int i;
+
+	if (usb_pipein(urb->pipe)) { // Is IN transfer
+
+		DEBUG_MSG("Copy data for IN transfer\n");
+
+		buffer = urb->transfer_buffer;
+		length = urb->actual_length;
+
+		DEBUG_MSG("There are %d segments totally\n", urb->num_sgs);
+
+		for_each_sg(urb->sg, sg, urb->num_sgs, i) {
+
+			if (!PageHighMem(sg_page(sg))) {
+				buf = sg_virt(sg);
+				//len = sg_dma_len(sg);
+				len = sg->length;
+				DEBUG_MSG("Scatter Gather segment %d (0x%X) length is %d\n", i, sg, len);
+				if (len == 0) {
+					ALERT_MSG("SG length is zero\n");
+					retval = -2;
+					break;
+				}
+				memcpy(buf, buffer + offset, len);
+				offset += len;
+
+				if (offset >= length)
+					break; // We may receive less data than expected!
+			}
+			else {
+				ALERT_MSG("Some scatter gather page in High Memory\n");
+				retval = -1;
+				break;
+			}
+		}
+
+	} else { // OUT transfer
+
+		DEBUG_MSG("Copy data for OUT transfer\n");
+
+		buffer = urb->transfer_buffer;
+		length = urb->transfer_buffer_length;
+
+		DEBUG_MSG("There are %d segments totally\n", urb->num_sgs);
+		for_each_sg(urb->sg, sg, urb->num_sgs, i) {
+
+			if (!PageHighMem(sg_page(sg))) {
+				buf = sg_virt(sg);
+				//len = sg_dma_len(sg);
+				len = sg->length;
+				DEBUG_MSG("Scatter Gather segment %d (0x%X) length is %d\n", i, sg, len);
+				if (len == 0) {
+					ALERT_MSG("SG length is zero\n");
+					retval = -2;
+					break;
+				}
+				memcpy(buffer + offset, buf, len);
+				offset += len;
+			}
+			else {
+				ALERT_MSG("Some scatter gather page in High Memory\n");
+				retval = -1;
+				break;
+			}
+		}
+	}
+
+	return retval;
+}
+
 static int qtd_copy_status (
 	struct ft313_hcd *ft313,
 	struct urb *urb,
@@ -511,7 +586,7 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 			 * complete and all its qtds must be recycled.
 			 */
 			if ((token & QTD_STS_HALT) != 0) {
-				ALERT_MSG("Halt bit is set for qTD 0x%08x\n", qtd->qtd_ft313);
+				DEBUG_MSG("Halt bit is set for qTD 0x%X\n", qtd->qtd_ft313);
 				/* retry transaction errors until we
 				 * reach the software xacterr limit
 				 */
@@ -519,7 +594,8 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 						QTD_CERR(token) == 0 &&
 						++qh->xacterrs < QH_XACTERR_MAX &&
 						!urb->unlinked) {
-					ALERT_MSG("detected XactErr len %zu/%zu retry %d\n",
+					DEBUG_MSG(
+	"detected XactErr len %zu/%zu retry %d\n",
 						qtd->length - QTD_LENGTH(token), qtd->length, qh->xacterrs);
 
 					/* reset the token in the qtd and the
@@ -541,6 +617,9 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 							qh->qh_ft313 + offsetof(struct ehci_qh_hw, hw_token));
 					goto retry_xacterr;
 				}
+				ALERT_MSG("detected XactErr len %zu/%zu retry %d\n",
+					qtd->length - QTD_LENGTH(token), qtd->length, qh->xacterrs);
+				ALERT_MSG("token 0x%08x\n", token);
 				stopped = 1;
 
 			/* magic dummy for some short reads; qh won't advance.
@@ -609,6 +688,10 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 		if (last_status == -EINPROGRESS) {
 			last_status = qtd_copy_status(ft313, urb,
 					qtd->length, token, qtd->hw_buf[0]);
+
+			if (last_status == -EREMOTEIO)
+				got_short_packet = 1;
+
 			if (last_status == -EREMOTEIO
 					&& (qtd->hw_alt_next
 						& EHCI_LIST_END(ft313)))
@@ -658,17 +741,15 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 
 	/* last urb's completion might still need calling */
 	if (likely (last != NULL)) {
-		if ((usb_pipetype (urb->pipe) == PIPE_CONTROL) || // Control transfer
-		    (usb_pipetype (urb->pipe) == PIPE_INTERRUPT) || // Interrupt transfer
+		if ((usb_pipetype (last->urb->pipe) == PIPE_CONTROL) || // Control transfer
+		    (usb_pipetype (last->urb->pipe) == PIPE_INTERRUPT) || // Interrupt transfer
 		    (1 == got_short_packet) || // Got short packet case
 		    (last_status != -EINPROGRESS) || // Error happens from copy_urb_status()
 		    (last->urb->actual_length == last->urb->transfer_buffer_length)) { // Really complete
-			// Set lock here!
-			//unsigned long flags;
-
 			DEBUG_MSG("urb 0x%p is done out of loop by qH 0x%08x\n", last->urb, qh->qh_ft313);
 
-			if (!list_empty(&qh->urb_list)) {
+			if (!list_empty(&qh->urb_list) &&
+			   (usb_pipetype (last->urb->pipe) == PIPE_BULK)) {
 				// There is urb waiting
 				struct qh_urb_queue_item *qh_urb_q_item;
 				qh_urb_q_item = list_entry(qh->urb_list.next,
@@ -687,6 +768,21 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 				DEBUG_MSG("qh 0x%08x (0x%p) is idle already\n", qh->qh_ft313, qh);
 			}
 
+			if (last->urb->num_sgs > 0 &&
+					last->urb->transfer_buffer_length > 0) { // Scatter/gather is used
+
+				if (usb_pipein(last->urb->pipe)) { // IN transfer
+
+					if (0 > urb_copy_sglist_buffer(last->urb)) {
+						ALERT_MSG("Copy scatter/gather buffer fails\n");
+					}
+				}
+
+				// Scatter/gather used for this OUT transfer
+				kfree(last->urb->transfer_buffer);
+				last->urb->transfer_buffer = NULL;
+			}
+
 			ft313_urb_done(ft313, last->urb, last_status);
 			count++;
 			ft313_qtd_free (ft313, last);
@@ -696,21 +792,54 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 				if (0 == last_seg_still_active) { // This is used to prevent programing next segment
 								  // if this function is called too early
 					qh->urb_pending = 1;
-					qh->urb = urb;
+					qh->urb = last->urb;
 					qh->mem_flags = last->mem_flags;
 					ft313_qtd_free(ft313, last);
-					DEBUG_MSG("Program next segment of urb 0x%p\n", urb);
+					DEBUG_MSG("Program next segment of urb 0x%p\n", last->urb);
 				} else {
 					ALERT_MSG("Last segment is still Active, error case!\n");
 					qh->urb_pending = 0;
 				}
 			} else {
-				qh->urb_pending = 0;
+				ERROR_MSG("urb 0x%X is completed due to qh 0x%X unlinked with status as %d \n", \
+					  (u32)last->urb, qh->qh_ft313, last_status);
+				ft313_urb_done(ft313, last->urb, last_status);
+				count++;
 				ft313_qtd_free(ft313, last);
+
+				if (!list_empty(&qh->urb_list)) {
+					// There is urb waiting
+					struct qh_urb_queue_item *qh_urb_q_item;
+
+					do {
+						qh_urb_q_item = list_entry(qh->urb_list.next,
+								       struct qh_urb_queue_item,
+								       urb_list);
+						qh->urb = qh_urb_q_item->urb;
+						list_del(&qh_urb_q_item->urb_list);
+						kfree(qh_urb_q_item);
+
+						if (qh->urb->unlinked) {
+							//The queued urb is has been canceled already!
+							ft313_urb_done(ft313, qh->urb, last_status);
+							count++;
+							qh->urb_pending = 0;
+							qh->urb = NULL;
+						} else {
+							qh->urb_pending = 1;
+							qh->mem_flags = qh_urb_q_item->mem_flags;
+							DEBUG_MSG("urb 0x%X is waiting already\n", (unsigned int)qh->urb);
+							break; // Found the next URB, stop here!
+				}
+					} while (!list_empty(&qh->urb_list));
+				} else {
+					qh->urb_pending = 0;
+					qh->urb = NULL;
+		}
+
 			}
 		}
-	} else if ((1 == last_seg_still_active) &&
-		   (usb_pipetype (urb->pipe) != PIPE_INTERRUPT)) {
+	} else if (1 == last_seg_still_active) {
 		//DEBUG_MSG("Last segment is still Active when complete irq generated, may due to irq is from other qH\n");
 		qh->urb_pending = 0;
 	}
@@ -838,8 +967,9 @@ qh_urb_transaction (
 	DEBUG_MSG("urb 0x%p reminding payload size is %d\n", urb, len);
 
 	if (usb_pipebulk(urb->pipe) &&
-	    (len <= 0)) {
-		ALERT_MSG("\n\n\nTry to programming %d length bulk packet!!!\n\n\n", len);
+	    (len < 0)) {
+		ALERT_MSG("\n\n\nTry to programming %d length bulk packet for urb 0x%X\n", len, (unsigned int)urb);
+		ALERT_MSG("Its transfer buffer length is %d and actual length is %d \n\n\n", urb->transfer_buffer_length, urb->actual_length);
 		goto cleanup;
 	}
 
@@ -863,7 +993,6 @@ qh_urb_transaction (
 			goto cleanup;
 		}
 		qtd->urb = urb;
-//		qtd_prev->hw_next = QTD_NEXT(ft313, qtd->qtd_dma);
 		qtd_prev->hw_next = QTD_NEXT(ft313, qtd->qtd_ft313);
 
 		list_add_tail (&qtd->qtd_list, head);
@@ -882,16 +1011,25 @@ qh_urb_transaction (
 	 */
 	i = urb->num_sgs;
 	if (len > 0 && i > 0) {
-		ALERT_MSG("FT313 HCD does not support scatter list\n");
+		DEBUG_MSG("num of sg is %d, while urb->trasfer_buffer is 0x%X with length %d\n", urb->num_sgs, urb->transfer_buffer, len);
+
+		if (urb->transfer_buffer == NULL) { //Only for the first time!
+			urb->transfer_buffer = kmalloc(len, flags);
+			if (urb->transfer_buffer == NULL) {
+				ALERT_MSG("Memory allocataion failed for SG support\n");
 		goto cleanup;
+			}
 
-		sg = urb->sg;
-		buf = (void *)sg_dma_address(sg);
+			if (!is_input) { //OUT transfer
+				if (0 > urb_copy_sglist_buffer(urb)) {
+					ALERT_MSG("Error copy data to OUT transfer SG buffer\n");
+					goto cleanup;
+				}
+			}
+		}
 
-		/* urb->transfer_buffer_length may be smaller than the
-		 * size of the scatterlist (or vice versa)
-		 */
-		this_sg_len = min_t(int, sg_dma_len(sg), len);
+		buf = urb->transfer_buffer + urb->actual_length;
+		this_sg_len = len;
 	} else {
 		sg = NULL;
 		//buf = urb->transfer_dma;
@@ -945,24 +1083,6 @@ qh_urb_transaction (
 		if ((maxpacket & (this_qtd_len + (maxpacket - 1))) == 0) {
 			token ^= QTD_TOGGLE;
 		}
-#if 0
-		if (likely(this_sg_len <= 0)) {
-			if (--i <= 0 || len <= 0)
-				break;
-			sg = sg_next(sg);
-			buf = sg_dma_address(sg);
-			this_sg_len = min_t(int, sg_dma_len(sg), len);
-		}
-
-		qtd_prev = qtd;
-		qtd = ft313_qtd_alloc (ft313, flags);
-		if (unlikely (!qtd))
-			goto cleanup;
-		qtd->urb = urb;
-		qtd_prev->hw_next = QTD_NEXT(ft313, qtd->qtd_dma);
-		list_add_tail (&qtd->qtd_list, head);
-#endif
-
 	}
 
 	/*
@@ -1227,8 +1347,6 @@ done:
 
 static void qh_link_async (struct ft313_hcd *ft313, struct ehci_qh *qh)
 {
-//MJT REMOVED UNUSED VAR
-//	__hc32		dma = QH_NEXT(ft313, qh->qh_dma);
 	__hc32		dma_ft313 = QH_NEXT(ft313, qh->qh_ft313);
 	struct ehci_qh	*head;
 
@@ -1327,7 +1445,9 @@ static struct ehci_qh *qh_append_tds (
 		*ptr = qh;
 	}
 
-	DEBUG_MSG("qH 0x%08x is used to serve EP 0x%08x at Addr %d\n", qh->qh_ft313, epnum, usb_pipedevice(urb->pipe));
+	if (NULL != qh)
+		DEBUG_MSG("qH 0x%08x is used to serve EP 0x%08x at Addr %d\n", \
+			  qh->qh_ft313, epnum, usb_pipedevice(urb->pipe));
 
 	if (likely (qh != NULL)) {
 		struct ehci_qtd	*qtd;
@@ -1410,27 +1530,6 @@ static struct ehci_qh *qh_append_tds (
 		}
 	}
 
-#if 0 // Debug only
-	{
-		struct list_head	*entry, *temp;
-
-		DEBUG_MSG("Dummy qTD for qH 0x%08x is 0x%08x\n", qh->qh_ft313, qh->dummy->qtd_ft313);
-
-		list_for_each_safe (entry, temp, &qh->qtd_list) {
-			struct ehci_qtd	*qtd;
-
-			qtd = list_entry (entry, struct ehci_qtd, qtd_list);
-			//list_del (&qtd->qtd_list);
-			//ft313_qtd_free (ft313, qtd);
-			DEBUG_MSG("qTD 0x%08x is here\n", qtd->qtd_ft313);
-		}
-		ft313_reg_read32(ft313, &ft313->regs->intr_enable);
-		ft313_reg_read32(ft313, &ft313->regs->status);
-		ft313_reg_read32(ft313, &ft313->regs->async_next);
-	}
-#endif
-
-
 	FUN_EXIT();
 
 	return qh;
@@ -1455,19 +1554,6 @@ submit_async (
 
 	epnum = urb->ep->desc.bEndpointAddress;
 
-#ifdef EHCI_URB_TRACE
-	{
-		struct ehci_qtd *qtd;
-		qtd = list_entry(qtd_list->next, struct ehci_qtd, qtd_list);
-		ehci_dbg(ehci,
-			 "%s %s urb %p ep%d%s len %d, qtd %p [qh %p]\n",
-			 __func__, urb->dev->devpath, urb,
-			 epnum & 0x0f, (epnum & USB_DIR_IN) ? "in" : "out",
-			 urb->transfer_buffer_length,
-			 qtd, urb->ep->hcpriv);
-	}
-#endif
-
 	spin_lock_irqsave (&ft313->lock, flags);
 	if (unlikely(!HCD_HW_ACCESSIBLE(ft313_to_hcd(ft313)))) {
 		rc = -ESHUTDOWN;
@@ -1488,6 +1574,15 @@ submit_async (
 	if (unlikely(qh == NULL)) {
 		usb_hcd_unlink_urb_from_ep(ft313_to_hcd(ft313), urb);
 		rc = -ENOMEM;
+
+		printk(KERN_ALERT "\n\n\n\n");
+		printk(KERN_ALERT "#######################################");
+		printk(KERN_ALERT "#                                     #");
+		printk(KERN_ALERT "#  Maximum Number of Devices Reached  #");
+		printk(KERN_ALERT "#                                     #");
+		printk(KERN_ALERT "#######################################");
+		printk(KERN_ALERT "\n\n\n\n");
+
 		goto done;
 	}
 
@@ -1499,10 +1594,6 @@ submit_async (
 	else {
 		DEBUG_MSG("qh 0x%08x is not idle but %d \n", qh->qh_ft313, qh->qh_state);
 	}
-
-#if 0 // Debug only
-	display_async_list(ft313);
-#endif
 
  done:
 	spin_unlock_irqrestore (&ft313->lock, flags);
@@ -1527,7 +1618,7 @@ submit_async_next (
 	int			epnum;
 //	unsigned long		flags;
 	struct ehci_qh		*qh = NULL;
-	int			rc;
+	int			rc = 0;
 
 	FUN_ENTRY();
 
@@ -1554,9 +1645,9 @@ submit_async_next (
 
 	if (urb->actual_length == 0) { // Only first segment need this!
 		DEBUG_MSG("Link urb to ep \n");
-		rc = usb_hcd_link_urb_to_ep(ft313_to_hcd(ft313), urb);
-		if (unlikely(rc))
-			goto done;
+//		rc = usb_hcd_link_urb_to_ep(ft313_to_hcd(ft313), urb);
+//		if (unlikely(rc))
+//			goto done;
 	} else {
 		DEBUG_MSG("Program next segment!\n");
 	}
@@ -1572,15 +1663,11 @@ submit_async_next (
 	/* Control/bulk operations through TTs don't need scheduling,
 	 * the HC and TT handle it when the TT has a buffer ready.
 	 */
-	if (likely (qh->qh_state == QH_STATE_IDLE))
+	if (unlikely (qh->qh_state == QH_STATE_IDLE))
 		qh_link_async(ft313, qh);
 	else {
 		DEBUG_MSG("qh 0x%08x is not idle but %d \n", qh->qh_ft313, qh->qh_state);
 	}
-
-#if 0 // Debug only
-	display_async_list(ft313);
-#endif
 
 done:
 //	spin_unlock_irqrestore (&ft313->lock, flags);
@@ -1603,48 +1690,56 @@ static void end_unlink_async (struct ft313_hcd *ft313)
 	u32 current_async_addr = 0;
 	struct ehci_qh		*qh = ft313->reclaim;
 	struct ehci_qh		*next;
+	u32			cmd, status;
 
 	FUN_ENTRY();
 
 	iaa_watchdog_done(ft313);
 
-// Debug only
-//	display_async_list(ft313);
+	if (HC_IS_RUNNING(ft313_to_hcd(ft313)->state)) {
+		//Adjust the asynchronous list register value in case it is the same as qH for unlink
+		current_async_addr = ft313_reg_read32(ft313, &ft313->regs->async_next);
 
-	//Adjust the asynchronous list register value in case it is the same as qH for unlink
-	current_async_addr = ft313_reg_read32(ft313, &ft313->regs->async_next);
-	if (qh->qh_ft313 == current_async_addr) {
-		u32 cmd, status;
+		if (qh->qh_ft313 == current_async_addr) {
 
-		ERROR_MSG("Current async list register point to an unlinked qH, have to set manually!\n");
-		// FIXME: Check whether asynchronous schedule bit is still on before modify async list addr register
-		// This fix is not fully tested yet! Yang Chang on August 31, 2012
-		status = ft313_reg_read32(ft313, &ft313->regs->status);
-		cmd = ft313_reg_read32(ft313, &ft313->regs->command);
-		if (0 != (ASCH_STS & status)) { //Asychronous schedule still on
-			ALERT_MSG("Hack Async List Addr register on the fly!!!\n");
-			ALERT_MSG("Stop Async scheduling first\n");
-			ft313_reg_write32(ft313, cmd & ~ASCH_EN, &ft313->regs->command);
-
-			// Make sure asychrous schedule stopped
-			handshake(ft313, &ft313->regs->status, ASCH_STS, 0, 150);
+			ERROR_MSG("Wait for 10 milliseconds to see whether HW can correct it by itself \n");
+			mdelay(10);
+			current_async_addr = ft313_reg_read32(ft313, &ft313->regs->async_next);
 		}
+		//Adjust the asynchronous list register value in case it is the same as qH for unlink
+		if (qh->qh_ft313 == current_async_addr) {
+			ERROR_MSG("Current async list register point to an unlinked qH 0x%X, have to set manually!\n", current_async_addr);
+	
+			// Check whether asynchronous schedule bit is still on before modify async list addr register
+			status = ft313_reg_read32(ft313, &ft313->regs->status);
+			cmd = ft313_reg_read32(ft313, &ft313->regs->command);
+			if (0 != (ASCH_STS & status)) { //Asychronous schedule still on
+					ERROR_MSG("Hack Async List Addr register on the fly!!!\n");
+					ERROR_MSG("Stop Async scheduling first\n");
+					ft313_reg_write32(ft313, cmd & ~ASCH_EN, &ft313->regs->command);
 
-		if (qh->qh_next.qh != NULL) {
-			struct ehci_qh *next_qh;
-			next_qh = qh->qh_next.qh;
-			ft313_reg_write32(ft313, next_qh->qh_ft313, &ft313->regs->async_next);
-			DEBUG_MSG("Set async list reg as 0x%08x\n", next_qh->qh_ft313);
-		} else {
-			ft313_reg_write32(ft313, ft313->async->qh_ft313, &ft313->regs->async_next);
-			ERROR_MSG("Set async list reg as 0x%08x\n", ft313->async->qh_ft313);
-		}
+					// Make sure asychrous schedule stopped
+					handshake(ft313, &ft313->regs->status, ASCH_STS, 0, 150);
+			}
 
-		//FIXME: Restore Asyncronous schedule bit if stopped above
-		if (0 != (ASCH_STS & status)) {
-			ft313_reg_write32(ft313, cmd | ASCH_EN, &ft313->regs->command);
-			handshake(ft313, &ft313->regs->status, ASCH_STS, ASCH_STS, 150);
-			ALERT_MSG("Restore Async scheduling\n");
+			if (qh->qh_next.qh != NULL) {
+				struct ehci_qh *next_qh;
+				next_qh = qh->qh_next.qh;
+				ft313_reg_write32(ft313, next_qh->qh_ft313, &ft313->regs->async_next);
+				ERROR_MSG("Set async list reg as 0x%08x\n", next_qh->qh_ft313);
+			} else {
+				ft313_reg_write32(ft313, ft313->async->qh_ft313, &ft313->regs->async_next);
+				ERROR_MSG("Set async list reg as 0x%08x, the default one\n", ft313->async->qh_ft313);
+			}
+
+			// Restore Asyncronous schedule bit if stopped above
+			if (0 != (ASCH_STS & status)) {
+				if (0 != (cmd & ASCH_EN)) { // If Async schedule is enabled before
+					ft313_reg_write32(ft313, cmd, &ft313->regs->command);
+					handshake(ft313, &ft313->regs->status, ASCH_STS, ASCH_STS, 150);
+					ERROR_MSG("Restore Async scheduling\n");
+				}
+			}
 		}
 	}
 
@@ -1661,17 +1756,30 @@ static void end_unlink_async (struct ft313_hcd *ft313)
 
 	qh_completions (ft313, qh);
 
-	if (!list_empty (&qh->qtd_list)
-			&& HC_IS_RUNNING (ft313_to_hcd(ft313)->state))
-		qh_link_async (ft313, qh);
-	else {
-		/* it's not free to turn the async schedule on/off; leave it
-		 * active but idle for a while once it empties.
-		 */
-		if (HC_IS_RUNNING (ft313_to_hcd(ft313)->state)
-				&& ft313->async->qh_next.qh == NULL)
-			timer_action (ft313, TIMER_ASYNC_OFF);
+	// If there is urb pending and pending urb is not unlinked
+	if (qh->urb_pending && !qh->urb->unlinked) {
+		if (0 > ft313_urb_enqueue_next(ft313, qh->urb, qh->mem_flags)) {
+			ALERT_MSG("Program queued URB failed!\n");
+			ft313_urb_done(ft313, qh->urb, -EPROTO); // report protocol error!
+		} else {
+			DEBUG_MSG("urb 0x%X is processed from queue\n", (unsigned int)qh->urb);
+		}
+
+		qh->urb_pending = 0;
+	} else {
+		if (!list_empty (&qh->qtd_list)
+				&& HC_IS_RUNNING (ft313_to_hcd(ft313)->state))
+			qh_link_async (ft313, qh);
+		else {
+			/* it's not free to turn the async schedule on/off; leave it
+			 * active but idle for a while once it empties.
+			 */
+			if (HC_IS_RUNNING (ft313_to_hcd(ft313)->state)
+					&& ft313->async->qh_next.qh == NULL)
+				timer_action (ft313, TIMER_ASYNC_OFF);
+		}
 	}
+
 	qh_put(qh);			/* refcount from async list */
 
 	if (next) {
@@ -1711,7 +1819,7 @@ static void start_unlink_async (struct ft313_hcd *ft313, struct ehci_qh *qh)
 			ft313_reg_write32(ft313, cmd & ~ASCH_EN,
 				    &ft313->regs->command);
 			wmb ();
-			DEBUG_MSG("Stop Async Scheduling\n");
+			ERROR_MSG("Stop Async Scheduling\n");
 
 			// Restore async reg to original value if not!
 			async_reg = ft313_reg_read32(ft313, &ft313->regs->async_next);
@@ -1751,24 +1859,6 @@ static void start_unlink_async (struct ft313_hcd *ft313, struct ehci_qh *qh)
 	if (ft313->qh_scan_next == qh)
 		ft313->qh_scan_next = qh->qh_next.qh;
 	wmb ();
-
-//	DEBUG_MSG("After remove qH 0x%08x\n", qh->qh_ft313);
-//	display_async_list(ft313);
-
-#if 0
-	//Adjust the asynchronous list register value in case it is the same as qH for unlink
-	u32 current_async_addr = 0;
-	current_async_addr = ft313_reg_read32(ft313, &ft313->regs->async_next);
-	if (qh->qh_ft313 == current_async_addr) {
-		if (qh->qh_next.qh != NULL) {
-			struct ehci_qh *next_qh;
-			next_qh = qh->qh_next.qh;
-			ft313_reg_write32(ft313, next_qh->qh_ft313, &ft313->regs->async_next);
-		} else {
-			ft313_reg_write32(ft313, ft313->async->qh_ft313, &ft313->regs->async_next);
-		}
-	}
-#endif
 
 	/* If the controller isn't running, we don't have to wait for it */
 	if (unlikely(!HC_IS_RUNNING(ft313_to_hcd(ft313)->state))) {
@@ -1835,23 +1925,22 @@ static void scan_async (struct ft313_hcd *ft313)
 				goto rescan;
 		}
 
-		if (0 != in_interrupt()) { //Assume called from ft313_work by ft313_irq()
+		if (in_interrupt()) { //Assume called from ft313_work by ft313_irq()
 			if (qh->urb_pending == 1) {
-				if (qh->urb != NULL) {
-					//spin_unlock(&ft313->lock);
-					if (0 > ft313_urb_enqueue_next(ft313, qh->urb, GFP_ATOMIC)) {
-						ALERT_MSG("Program next segment failed!\n");
-						qh->urb_pending = 0;
-						//spin_lock(&ft313->lock); // ft313_urb_done will release lock first!
+				if (usb_pipetype(qh->urb->pipe) == PIPE_BULK) {
+					if (0 > ft313_urb_enqueue_next(ft313, qh->urb, qh->mem_flags)) {
+						ALERT_MSG("Program queued URB failed!\n");
 						ft313_urb_done(ft313, qh->urb, -EPROTO); // report protocol error!
 					} else {
-						//qh->urb = NULL;
-						qh->urb_pending = 0;
-					//	spin_lock(&ft313->lock);
+						DEBUG_MSG("urb 0x%X is processed from queue\n", (unsigned int)qh->urb);
 					}
+					qh->urb_pending = 0;
+				} else {
+					ALERT_MSG("Bug in queuing\n");
 				}
 			}
 		}
+
 
 		/* unlink idle entries, reducing DMA usage as well
 		 * as HCD schedule-scanning costs.  delay for any qh

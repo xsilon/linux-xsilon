@@ -308,6 +308,7 @@ struct ehci_qh_hw {
 
 struct qh_urb_queue_item {
 	struct urb		*urb;
+	gfp_t			mem_flags;
 	struct list_head	urb_list;
 };
 
