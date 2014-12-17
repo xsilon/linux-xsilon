@@ -153,9 +153,6 @@ struct ft313_regs {
 	/* ASYNCLISTADDR: offset 0x28 */
 	u32		async_next;	/* address of next async queue head */
 
-	/* CONFIGFLAG: offset 0x2C */
-//	u32		configured_flag;
-//#define FLAG_CF		(1<<0)		/* true: we'll support "high speed" */
 	u32	placeholder_config_flag;
 	/* PORTSC: offset 0x30 */
 	u32		port_status[1];	/* one port only */

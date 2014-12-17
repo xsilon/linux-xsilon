@@ -551,7 +551,6 @@ int ft313_mem_init(struct ft313_hcd *ft313, gfp_t flags)
 	if (!ft313->itd_pool) {
 		goto fail;
 	}
-	ALERT_MSG("Create DMA Pool for iTD end\n");
 
 	/* SITD for full/low speed split ISO transfers */
 	ft313->sitd_pool = dma_pool_create ("ft313_sitd",

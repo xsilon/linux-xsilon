@@ -5,10 +5,11 @@
 //#define LOG_MEM_ACCESS_ON
 //#define DEBUG_MSG_ON
 
-//#define DMA_POOL_WORKAROUND
-//#define TI_PLAT_WORKAROUND
 #define DISABLE_HCD_DMA
 
+#define DMA_POOL_WORKAROUND
+
+//#define COMPLIANCE_TEST_MODE
 
 #define TRUE	1
 #define FALSE	0
@@ -60,7 +61,6 @@ struct ft313_hcd {
 
 	/* async schedule support */
 	struct ehci_qh		*async;
-//	struct ehci_qh		*dummy;		/* For AMD quirk use */
 	struct ehci_qh		*reclaim;
 	struct ehci_qh		*qh_scan_next;
 	unsigned		scanning : 1;
@@ -114,10 +114,6 @@ struct ft313_hcd {
 	/* SILICON QUIRKS */
 	unsigned		need_io_watchdog:1;
 
-#ifdef	PORT_RESET_TIME_WORKAROUND
-	struct timer_list	port_reset_timer;
-#endif
-
 	u8			sbrn;		/* packed release number */
 
 	/* irq statistics */
@@ -127,6 +123,7 @@ struct ft313_hcd {
 #else
 #	define COUNT(x) do {} while (0)
 #endif
+	// This workqueue is used for power management
 	struct workqueue_struct	*wakeup_wq;
 	const char		*wakeup_wq_name;
 	struct work_struct	wakeup_work;

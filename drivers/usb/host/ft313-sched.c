@@ -77,26 +77,10 @@ static void periodic_unlink (struct ft313_hcd *ft313, unsigned frame, void *ptr)
 	 */
 	*prev_p = *periodic_next_shadow(ft313, &here,
 					Q_NEXT_TYPE(ft313, *hw_p));
-#if 0 // As use_dummy_qh is always 0 for our case!
-	if (!ft313->use_dummy_qh ||
-			*shadow_next_periodic(ft313, &here, Q_NEXT_TYPE(ft313, *hw_p))
-			!= EHCI_LIST_END(ft313))
-#endif
+
 		*hw_p = *shadow_next_periodic(ft313, &here,
 					      Q_NEXT_TYPE(ft313, *hw_p));
-		//hw_p_ft313 = here.qh->qh_ft313 + offsetof(struct ehci_qh_hw, hw_next);
 		ft313_mem_write(ft313, hw_p, sizeof(*hw_p), hw_p_ft313);
-#if 0
-	else
-	{
-//		*hw_p = ft313->dummy->qh_dma;
-		*hw_p = ft313->dummy->qh_ft313;
-		ft313_mem_write(ft313,
-				&(ft313->dummy->qh_ft313),
-				sizeof(__hc32*),
-				(unsigned int)hw_p - (unsigned int)(ft313->periodic));
-	}
-#endif
 }
 
 /* how many of the uframe's 125 usecs are allocated? */
@@ -107,13 +91,6 @@ periodic_usecs (struct ft313_hcd *ft313, unsigned frame, unsigned uframe)
 	union ehci_shadow	*q = &ft313->pshadow [frame];
 	unsigned		usecs = 0;
 	struct ehci_qh_hw	*hw;
-
-//	FUN_ENTRY();
-
-//	DEBUG_MSG("Now process Frame number %d and uFrame number %d\n", frame, uframe);
-
-	// Update from chip memory, is this really needed? FixMe
-//	ft313_mem_read(ft313, &ft313->periodic[frame], sizeof(*hw_p), 0 + frame * sizeof(__le32));
 
 	while (q->ptr) {
 		switch (hc32_to_cpu(ft313, Q_NEXT_TYPE(ft313, *hw_p))) {
@@ -130,7 +107,7 @@ periodic_usecs (struct ft313_hcd *ft313, unsigned frame, unsigned uframe)
 							       1 << (8 + uframe)))
 					usecs += q->qh->c_usecs;
 				hw_p = &hw->hw_next;
-				DEBUG_MSG("hw_p now pointer to 0x%p with value 0x%08x\n", hw_p, *hw_p);
+				DEBUG_MSG("hw_p now pointer to 0x%X with value 0x%X\n", (unsigned int)hw_p, (unsigned int)(*hw_p));
 				q = &q->qh->qh_next;
 				break;
 				// case Q_TYPE_FSTN:
@@ -150,7 +127,7 @@ periodic_usecs (struct ft313_hcd *ft313, unsigned frame, unsigned uframe)
 				if (q->itd->hw_transaction[uframe])
 					usecs += q->itd->stream->usecs;
 				hw_p = &q->itd->hw_next;
-				DEBUG_MSG("hw_p now pointer to %p with value 0x%08x\n", hw_p, *hw_p);
+				DEBUG_MSG("hw_p now pointer to %p with value 0x%X\n", hw_p, *hw_p);
 				q = &q->itd->itd_next;
 				break;
 			case Q_TYPE_SITD:
@@ -499,8 +476,6 @@ static int enable_periodic (struct ft313_hcd *ft313)
 	/* make sure ehci_work scans these */
 	ft313->next_uframe = ft313_reg_read32(ft313, &ft313->regs->frame_index)
 			     % (ft313->periodic_size << 3);
-//	if (unlikely(ft313->broken_periodic))
-//		ft313->last_periodic_enable = ktime_get_real();
 
 	FUN_EXIT();
 
@@ -518,17 +493,6 @@ static int disable_periodic (struct ft313_hcd *ft313)
 		FUN_EXIT();
 		return 0;
 	}
-#if 0 // Faraday code does not have this
-	if (unlikely(ft313->broken_periodic)) {
-		/* delay experimentally determined */
-		ktime_t safe = ktime_add_us(ft313->last_periodic_enable, 1000);
-		ktime_t now = ktime_get_real();
-		s64 delay = ktime_us_delta(safe, now);
-
-		if (unlikely(delay > 0))
-			udelay(delay);
-	}
-#endif
 
 	/* did setting PSE not take effect yet?
 	 * takes effect only at frame boundaries...
@@ -569,15 +533,6 @@ static int qh_link_periodic (struct ft313_hcd *ft313, struct ehci_qh *qh)
 	unsigned	i;
 	unsigned	period = qh->period;
 
-	FUN_ENTRY();
-
-#if 0
-	dev_dbg (&qh->dev->dev,
-		 "link qh%d-%04x/%p start %d [%d/%d us]\n",
-		 period, hc32_to_cpup(ft313, &qh->hw->hw_info2)
-		 & (QH_CMASK | QH_SMASK),
-		 qh, qh->start, qh->usecs, qh->c_usecs);
-#endif
 	/* high bandwidth, or otherwise every microframe */
 	if (period == 0)
 		period = 1;
@@ -596,8 +551,6 @@ static int qh_link_periodic (struct ft313_hcd *ft313, struct ehci_qh *qh)
 				break;
 			prev = periodic_next_shadow(ft313, prev, type);
 			hw_p = shadow_next_periodic(ft313, &here, type);
-			//FixMe: currently, only qH is supported!
-			//hw_p_ft313 = prev->qh->qh_ft313 + offsetof(struct ehci_qh_hw, hw_next);
 			hw_p_ft313 = here.qh->qh_ft313 + offsetof(struct ehci_qh_hw, hw_next);
 			here = *prev;
 		}
@@ -610,9 +563,8 @@ static int qh_link_periodic (struct ft313_hcd *ft313, struct ehci_qh *qh)
 				break;
 			prev = &here.qh->qh_next;
 			hw_p = &here.qh->hw->hw_next; // hw_p no longer pointer to periodic list item!
-			//hw_p_ft313 = &here.qh->qh_ft313 + offsetof(struct ehci_qh_hw, hw_next);
-			/* MJT: REMOVED address off  */
-			hw_p_ft313 = here.qh->qh_ft313 + offsetof(struct ehci_qh_hw, hw_next);
+			hw_p_ft313 = (unsigned)(here.qh->qh_ft313) + offsetof(struct ehci_qh_hw, hw_next);
+			ALERT_MSG("hw_p_ft313 is 0x%X\n", hw_p_ft313);
 			here = *prev;
 		}
 		/* link in this qh, unless some earlier pass did that */
@@ -628,7 +580,6 @@ static int qh_link_periodic (struct ft313_hcd *ft313, struct ehci_qh *qh)
 			}
 			wmb ();
 			prev->qh = qh;
-//			*hw_p = QH_NEXT (ft313, qh->qh_dma);
 			*hw_p = QH_NEXT (ft313, qh->qh_ft313);
 
 			DEBUG_MSG("Update to HW\n");
@@ -648,7 +599,6 @@ static int qh_link_periodic (struct ft313_hcd *ft313, struct ehci_qh *qh)
 			: (qh->usecs * 8);
 
 	/* maybe enable periodic schedule processing */
-	FUN_EXIT();
 	return enable_periodic(ft313);
 }
 
@@ -704,7 +654,7 @@ static void intr_deschedule (struct ft313_hcd *ft313, struct ehci_qh *qh)
 
 	FUN_ENTRY();
 
-	DEBUG_MSG("Update qh 0x%08x from HW\n", qh->qh_ft313);
+	DEBUG_MSG("Update qh 0x%X from HW\n", qh->qh_ft313);
 	ft313_mem_read(ft313, hw, sizeof(*hw), qh->qh_ft313);
 
 	/* If the QH isn't linked then there's nothing we can do
@@ -901,7 +851,7 @@ static int qh_schedule(struct ft313_hcd *ft313, struct ehci_qh *qh)
 
 	FUN_ENTRY();
 
-	DEBUG_MSG("qH 0x%08x being scheduled\n", qh->qh_ft313);
+	DEBUG_MSG("qH 0x%X being scheduled\n", qh->qh_ft313);
 
 	qh_refresh(ft313, qh); //qh->hw will be refreshed in this function
 	hw->hw_next = EHCI_LIST_END(ft313);
@@ -964,7 +914,7 @@ static int qh_schedule(struct ft313_hcd *ft313, struct ehci_qh *qh)
 				sizeof(hw->hw_info2),
 				qh->qh_ft313 + offsetof(struct ehci_qh_hw, hw_info2));
 	} else
-		DEBUG_MSG("reused qh %p (0x%08x)schedule\n", qh, qh->qh_ft313);
+		DEBUG_MSG("reused qh %p (0x%X)schedule\n", qh, qh->qh_ft313);
 
 	/* stuff into the periodic schedule */
 	status = qh_link_periodic (ft313, qh);
@@ -1032,8 +982,6 @@ done_not_linked:
 	return status;
 }
 
-#if 1 // Iso related start
-
 /*-------------------------------------------------------------------------*/
 
 u32 get_iso_urb_size(struct urb *urb)
@@ -1050,22 +998,17 @@ u32 get_iso_urb_size(struct urb *urb)
 			offset = urb->iso_frame_desc[i].offset;
 			length = urb->iso_frame_desc[i].length;
 
-			DEBUG_MSG("No. %d segment at 0x%08x with length %d\n", i + 1, offset, length);
-			//total_length += length;
-
+			DEBUG_MSG("No. %d segment at 0x%X with length %d\n", i + 1, offset, length);
 		}
 
 		total_length = urb->iso_frame_desc[num_of_pkts - 1].offset +
 			       urb->iso_frame_desc[num_of_pkts - 1].length;
-
-
-
 	} else {
-		ALERT_MSG("urb 0x%p is not isochronous URB \n", urb);
+		ALERT_MSG("urb 0x%X is not isochronous URB \n", (unsigned int)urb);
 	}
 
-	DEBUG_MSG("Total payload size for iso urb 0x%p is %d with %d segments\n", \
-		  urb, total_length, num_of_pkts);
+	DEBUG_MSG("Total payload size for iso urb 0x%X is %d with %d segments\n", \
+		  (unsigned int)urb, total_length, num_of_pkts);
 
 	return total_length;
 }
@@ -1187,7 +1130,7 @@ iso_stream_init (
 	stream->interval = interval;
 	stream->maxp = maxp;
 
-	DEBUG_MSG("stream 0x%p's maxpacket with multi is %d, interval is %d\n", stream, maxp, interval);
+	DEBUG_MSG("stream 0x%X's maxpacket with multi is %d, interval is %d\n", (unsigned int)stream, maxp, interval);
 
 	FUN_EXIT();
 }
@@ -1205,7 +1148,7 @@ iso_stream_put(struct ft313_hcd *ft313, struct ehci_iso_stream *stream)
 	if ((stream->refcount == 1) &&
 	    (stream->urb_waiting == 0)) { // No urb waiting in queue as operation below is clear stream ptr in ep->hcpriv
 		// BUG_ON (!list_empty(&stream->td_list));
-		DEBUG_MSG("Clean up stream 0x%p\n", stream);
+		DEBUG_MSG("Clean up stream 0x%X\n", (unsigned int)stream);
 		while (!list_empty (&stream->free_list)) {
 			struct list_head	*entry;
 
@@ -1252,7 +1195,7 @@ iso_stream_put(struct ft313_hcd *ft313, struct ehci_iso_stream *stream)
 
 		stream->bEndpointAddress &= 0x0f;
 		if (stream->ep) {
-			DEBUG_MSG("ep->hcpriv is cleared for EP 0x%08x\n", stream->ep->desc.bEndpointAddress);
+			DEBUG_MSG("ep->hcpriv is cleared for EP 0x%X\n", stream->ep->desc.bEndpointAddress);
 			stream->ep->hcpriv = NULL;
 		}
 
@@ -1288,7 +1231,7 @@ iso_stream_find (struct ft313_hcd *ft313, struct urb *urb)
 	stream = ep->hcpriv;
 
 	if (unlikely (stream == NULL)) {
-		DEBUG_MSG("stream 0x%p is still NULL, need initialization\n", stream);
+		DEBUG_MSG("stream 0x%X is still NULL, need initialization\n", (unsigned int)stream);
 		stream = iso_stream_alloc(GFP_ATOMIC);
 		if (likely (stream != NULL)) {
 			/* dev->ep owns the initial refcount */
@@ -1341,8 +1284,6 @@ itd_sched_init(
 {
 	unsigned	i;
 	u32		urb_total_length = 0; //, actual_len;
-//	dma_addr_t	dma = urb->transfer_dma;
-//	void		*urb_buffer = urb->transfer_buffer;
 	u32		buffer_ft313;
 	struct ft313_mem_blk *mem_blk_ptr;
 	int is_input, maxpacket;
@@ -1372,7 +1313,7 @@ itd_sched_init(
 	}
 
 	buffer_ft313 = mem_blk_ptr->offset;
-	DEBUG_MSG("Payload buffer at 0x%08x with size %d\n", buffer_ft313, mem_blk_ptr->size);
+	DEBUG_MSG("Payload buffer at 0x%X with size %d\n", buffer_ft313, mem_blk_ptr->size);
 	if (stream->buffer_ft313 == 0) // No urb under execution
 		stream->buffer_ft313 = buffer_ft313;
 	else {
@@ -1385,7 +1326,7 @@ itd_sched_init(
 			INIT_LIST_HEAD(&iso_urb_q_item->urb_list);
 			list_add_tail(&iso_urb_q_item->urb_list, &stream->urb_list);
 
-			DEBUG_MSG("urb 0x%p's buffer offset 0x%08x is queued\n", urb, buffer_ft313);
+			DEBUG_MSG("urb 0x%X's buffer offset 0x%X is queued\n", (unsigned int)urb, buffer_ft313);
 
 		}
 		else {
@@ -1649,9 +1590,10 @@ sitd_slot_ok (
 		/* tt must be idle for start(s), any gap, and csplit.
 		 * assume scheduling slop leaves 10+% for control/bulk.
 		 */
-		if (!tt_no_collision (ft313, period_uframes << 3,
-				stream->udev, frame, mask))
+		if (!tt_no_collision (ft313, period_uframes << 3, stream->udev, frame, mask)) {
+			FUN_EXIT();
 			return 0;
+		}
 #endif
 
 		/* check starts (OUT uses more than one) */
@@ -1740,15 +1682,7 @@ iso_stream_schedule (
 
 		DEBUG_MSG("stream iTD list is not empty\n");
 
-		/* For high speed devices, allow scheduling within the
-		 * isochronous scheduling threshold.  For full speed devices
-		 * and Intel PCI-based controllers, don't (work around for
-		 * Intel ICH9 bug).
-		 */
-		if (!stream->highspeed) //FixMe: need revisit! original code is "&&", not "||" !
-			next = now + ft313->i_thresh;
-		else
-			next = now;
+		next = now;
 
 		/* Fell behind (by up to twice the slop amount)?
 		 * We decide based on the time of the last currently-scheduled
@@ -1882,7 +1816,6 @@ itd_patch(
 	itd->hw_transaction[uframe] = uf->transaction;
 	itd->hw_transaction[uframe] |= cpu_to_hc32(ft313, pg << 12);
 	itd->hw_bufp[pg] |= cpu_to_hc32(ft313, uf->bufp & ~(u32)0);
-//	itd->hw_bufp_hi[pg] |= cpu_to_hc32(ehci, (u32)(uf->bufp >> 32));
 
 	/* iso_frame_desc[].offset must be strictly increasing */
 	if (unlikely (uf->cross)) {
@@ -1890,7 +1823,6 @@ itd_patch(
 
 		itd->pg = ++pg;
 		itd->hw_bufp[pg] |= cpu_to_hc32(ft313, bufp & ~(u32)0);
-//		itd->hw_bufp_hi[pg] |= cpu_to_hc32(ehci, (u32)(bufp >> 32));
 	}
 
 	ft313_mem_write(ft313, itd, sizeof(struct ehci_itd_hw), itd->itd_ft313);
@@ -1909,7 +1841,7 @@ itd_link (struct ft313_hcd *ft313, unsigned frame, struct ehci_itd *itd)
 
 	/* skip any iso nodes which might belong to previous microframes */
 	while (here.ptr) {
-		DEBUG_MSG("here.ptr is 0x%p\n", here.ptr);
+		DEBUG_MSG("here.ptr is 0x%X\n", (unsigned int)here.ptr);
 
 		type = Q_NEXT_TYPE(ft313, *hw_p);
 		if (type == cpu_to_hc32(ft313, Q_TYPE_QH))
@@ -1948,7 +1880,6 @@ itd_link (struct ft313_hcd *ft313, unsigned frame, struct ehci_itd *itd)
 	prev->itd = itd;
 	itd->frame = frame;
 	wmb ();
-//	*hw_p = cpu_to_hc32(ft313, itd->itd_dma | Q_TYPE_ITD);
 	*hw_p = cpu_to_hc32(ft313, itd->itd_ft313 | Q_TYPE_ITD);
 	ft313_mem_write(ft313, hw_p, sizeof(*hw_p), hw_p_ft313);
 }
@@ -1984,12 +1915,7 @@ itd_link_urb (
 			next_uframe >> 3, next_uframe & 0x7);*/
 	}
 
-#if 0
-	if (ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs == 0) {
-		if (ehci->amd_pll_fix == 1)
-			usb_amd_quirk_pll_disable();
-	}
-#endif
+
 	ft313_to_hcd(ft313)->self.bandwidth_isoc_reqs++;
 
 	/* fill iTDs uframe by uframe */
@@ -2140,7 +2066,7 @@ itd_complete (
 	 */
 
 	// Free urb data buffer
-	DEBUG_MSG("Free buffer mem blk for urb 0x%p which is at 0x%08x\n", urb, stream->buffer_ft313);
+	DEBUG_MSG("Free buffer mem blk for urb 0x%X which is at 0x%X\n", (unsigned int)urb, stream->buffer_ft313);
 	free_mem_blk(ft313, stream->buffer_ft313);
 	if (!list_empty(&stream->urb_list)) { // there is urb in queue
 		struct iso_urb_queue_item *iso_urb_q_item;
@@ -2151,11 +2077,11 @@ itd_complete (
 		stream->buffer_ft313 = iso_urb_q_item->urb_buffer;
 		stream->urb_waiting = 1;
 
-		DEBUG_MSG("urb 0x%p is moved out of queue\n", stream->urb);
+		DEBUG_MSG("urb 0x%X is moved out of queue\n", (unsigned int)stream->urb);
 		list_del(&iso_urb_q_item->urb_list);
 		kfree(iso_urb_q_item);
 	} else {
-		DEBUG_MSG("urb queue for stream 0x%p is empty\n", stream);
+		DEBUG_MSG("urb queue for stream 0x%X is empty\n", (unsigned int)stream);
 		stream->urb = NULL;
 		stream->urb_waiting = 0;
 		stream->buffer_ft313 = 0;
@@ -2330,7 +2256,7 @@ sitd_sched_init(
 		FUN_EXIT();
 		return -1;
 	}
-	DEBUG_MSG("Got a buffer with size %d at 0x%08x.\n", mem_blk_ptr->size, mem_blk_ptr->offset);
+	DEBUG_MSG("Got a buffer with size %d at 0x%X.\n", mem_blk_ptr->size, mem_blk_ptr->offset);
 
 	if (mem_blk_ptr->size < urb_total_length) { // Get a smaller buffer than needed
 		if (mem_blk_ptr->size < maxpacket) {
@@ -2342,7 +2268,7 @@ sitd_sched_init(
 	}
 
 	buffer_ft313 = mem_blk_ptr->offset;
-	DEBUG_MSG("Payload buffer at 0x%08x with size %d\n", buffer_ft313, mem_blk_ptr->size);
+	DEBUG_MSG("Payload buffer at 0x%X with size %d\n", buffer_ft313, mem_blk_ptr->size);
 	if (stream->buffer_ft313 == 0) // No urb under execution
 		stream->buffer_ft313 = buffer_ft313;
 	else {
@@ -2355,7 +2281,7 @@ sitd_sched_init(
 			INIT_LIST_HEAD(&iso_urb_q_item->urb_list);
 			list_add_tail(&iso_urb_q_item->urb_list, &stream->urb_list);
 
-			DEBUG_MSG("urb 0x%p's buffer offset 0x%08x is queued\n", urb, buffer_ft313);
+			DEBUG_MSG("urb 0x%X's buffer offset 0x%X is queued\n", (unsigned int)urb, buffer_ft313);
 
 		}
 		else {
@@ -2597,12 +2523,7 @@ sitd_link_urb (
 			(next_uframe >> 3) & (ft313->periodic_size - 1),
 			stream->interval, hc32_to_cpu(ft313, stream->splits));
 	}
-#if 0
-	if (ft313_to_hcd(ft313)->self.bandwidth_isoc_reqs == 0) {
-		if (ehci->amd_pll_fix == 1)
-			usb_amd_quirk_pll_disable();
-	}
-#endif
+
 	ft313_to_hcd(ft313)->self.bandwidth_isoc_reqs++;
 
 	/* fill sITDs frame by frame */
@@ -2712,7 +2633,7 @@ sitd_complete (
 	 */
 
 	// Free urb data buffer
-	DEBUG_MSG("Free buffer mem blk for urb 0x%p which is at 0x%08x\n", urb, stream->buffer_ft313);
+	DEBUG_MSG("Free buffer mem blk for urb 0x%X which is at 0x%X\n", (unsigned int)urb, stream->buffer_ft313);
 	free_mem_blk(ft313, stream->buffer_ft313);
 	if (!list_empty(&stream->urb_list)) { // there is urb in queue
 		struct iso_urb_queue_item *iso_urb_q_item;
@@ -2723,11 +2644,11 @@ sitd_complete (
 		stream->buffer_ft313 = iso_urb_q_item->urb_buffer;
 		stream->urb_waiting = 1;
 
-		DEBUG_MSG("urb 0x%p is moved out of queue\n", stream->urb);
+		DEBUG_MSG("urb 0x%X is moved out of queue\n", (unsigned int)stream->urb);
 		list_del(&iso_urb_q_item->urb_list);
 		kfree(iso_urb_q_item);
 	} else {
-		DEBUG_MSG("urb queue for stream 0x%p is empty\n", stream);
+		DEBUG_MSG("urb queue for stream 0x%X is empty\n", (unsigned int)stream);
 		stream->urb = NULL;
 		stream->urb_waiting = 0;
 		stream->buffer_ft313 = 0;
@@ -2859,9 +2780,9 @@ static void free_cached_lists(struct ft313_hcd *ft313)
 }
 
 
-#endif // Iso related end
 
 /*-------------------------------------------------------------------------*/
+
 
 static void
 scan_periodic (struct ft313_hcd *ft313)
@@ -2909,7 +2830,7 @@ restart:
 //		DEBUG_MSG("Process frame No. %d\n", frame);
 		q_p = &ft313->pshadow [frame];
 		hw_p = &ft313->periodic [frame];
-		hw_p_ft313 = 0 + sizeof(__hc32) * frame;
+		hw_p_ft313 = ft313->periodic_ft313 + sizeof(__hc32) * frame;
 		q.ptr = q_p->ptr;
 		type = Q_NEXT_TYPE(ft313, *hw_p);
 		modified = 0;
@@ -2924,41 +2845,19 @@ restart:
 			switch (hc32_to_cpu(ft313, type)) {
 				case Q_TYPE_QH: {
 					/* handle any completions */
-					DEBUG_MSG("Process qH\n");
 					temp.qh = qh_get (q.qh);
 					type = Q_NEXT_TYPE(ft313, q.qh->hw->hw_next);
 					q = q.qh->qh_next;
 					if (temp.qh->stamp != ft313->periodic_stamp) {
+						DEBUG_MSG("Process qH 0x%X\n", temp.qh->qh_ft313);
 						modified = qh_completions(ft313, temp.qh);
 						if (!modified)
 							temp.qh->stamp = ft313->periodic_stamp;
-#if 0 // Disable urb queue for interrupt transfer
-						if (0 != in_interrupt()) { //Assume called from ft313_work by ft313_irq()
-							if (temp.qh->urb_pending == 1) {
-								if (temp.qh->urb != NULL) {
-									spin_unlock(&ft313->lock);
-									if (0 > ft313_urb_enqueue_next(ft313, temp.qh->urb, GFP_ATOMIC)) {
-										ERROR_MSG("Program next segment failed!\n");
-										temp.qh->urb_pending = 0;
-										spin_lock(&ft313->lock); // ft313_urb_done will release lock first!
-										ft313_urb_done(ft313, temp.qh->urb, -EPROTO); // report protocol error!
-									} else {
-										//qh->urb = NULL;
-										//qh->urb_pending = 0;
-										spin_lock(&ft313->lock);
-									}
-								}
-							}
-						}
 
-						if ((temp.qh->urb_pending != 1) ||
-						    (0 == in_interrupt()))
-#endif
-						{ // No urb queue processing
-							if (unlikely(list_empty(&temp.qh->qtd_list) ||
-									temp.qh->needs_rescan))
-								intr_deschedule(ft313, temp.qh);
-						}
+						if (unlikely(list_empty(&temp.qh->qtd_list) ||
+								temp.qh->needs_rescan))
+							intr_deschedule(ft313, temp.qh);
+
 					}
 					qh_put (temp.qh);
 					break;
@@ -2967,7 +2866,7 @@ restart:
 					/* for "save place" FSTNs, look at QH entries
 					 * in the previous frame for completions.
 					 */
-					ERROR_MSG("Wrong Execution, FSTN not supported\n");
+					ALERT_MSG("Wrong Execution, FSTN not supported\n");
 					if (q.fstn->hw_prev != EHCI_LIST_END(ft313)) {
 						DEBUG_MSG("ignoring completions from FSTNs");
 					}
@@ -3012,13 +2911,10 @@ restart:
 					 * pointer for much longer, if at all.
 					 */
 					*q_p = q.itd->itd_next;
-//					if (!ft313->use_dummy_qh ||
-//							q.itd->hw_next != EHCI_LIST_END(ft313))
-						*hw_p = q.itd->hw_next;
-						DEBUG_MSG("Update itd 0x%X's hw_next field\n", q.itd->itd_ft313);
-						ft313_mem_write(ft313, hw_p, sizeof(__hc32), hw_p_ft313);
-//					else
-//						*hw_p = ft313->dummy->qh_dma;
+					*hw_p = q.itd->hw_next;
+					DEBUG_MSG("Update itd 0x%X's hw_next field\n", q.itd->itd_ft313);
+					ft313_mem_write(ft313, hw_p, sizeof(__hc32), hw_p_ft313);
+
 					type = Q_NEXT_TYPE(ft313, q.itd->hw_next);
 					wmb();
 					stream = q.itd->stream; //Save stream info.
@@ -3058,7 +2954,6 @@ restart:
 					 */
 					*q_p = q.sitd->sitd_next;
 
-					// FixMe: revisit here, there is an "if" clause in original code
 					*hw_p = q.sitd->hw_next;
 					DEBUG_MSG("Update sitd 0x%X's hw_next \n", q.sitd->sitd_ft313);
 					ft313_mem_write(ft313, hw_p, sizeof(__hc32), hw_p_ft313);
@@ -3071,9 +2966,9 @@ restart:
 					break;
 				}
 				default: {
-					ERROR_MSG("corrupt type %d frame %d shadow %p",
+					ALERT_MSG("corrupt type %d frame %d shadow %p",
 					     type, frame, q.ptr);
-					// BUG ();
+					BUG ();
 					q.ptr = NULL;
 				}
 			}
@@ -3083,7 +2978,7 @@ restart:
 				// Check urb queue here as one urb is completed
 				if (stream != NULL) {
 					if (stream->urb_waiting == 1) {
-						DEBUG_MSG("There is urb 0x%p from queue, submit it\n", stream->urb);
+						DEBUG_MSG("There is urb 0x%X from queue, submit it\n", (unsigned int)stream->urb);
 						spin_unlock(&ft313->lock); // Unlock so that next urb submit can continue
 						if (0 > ft313_urb_enqueue_next(ft313, stream->urb, GFP_ATOMIC)) {
 							ALERT_MSG("Iso urb submission from queue failed\n");
@@ -3137,7 +3032,7 @@ restart:
 				break;
 
 			/* rescan the rest of this frame, then ... */
-			DEBUG_MSG("Rescan the rest of frame\n");
+			//DEBUG_MSG("Rescan the rest of frame\n");
 			clock = now;
 			clock_frame = clock >> 3;
 			if (ft313->clock_frame != clock_frame) {
@@ -3146,7 +3041,7 @@ restart:
 				++ft313->periodic_stamp;
 			}
 		} else {
-			DEBUG_MSG("now_uframe != clock\n");
+			//DEBUG_MSG("now_uframe != clock\n");
 			now_uframe++;
 			now_uframe &= mod - 1;
 		}

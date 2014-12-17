@@ -78,7 +78,7 @@ static int ft313_platform_setup(struct usb_hcd *hcd)
 	tmp = ft313_reg_read16(ft313, &ft313->cfg->config);
 	DEBUG_MSG("bcd_mode is %s\n", bcd_mode);
 
-	if (!strcmp(bcd_mode, "Disabled")) {
+	if (!strcmp(bcd_mode, "Disable")) {
 		tmp &= ~BCD_EN; // Disable BCD
 	} else if (!strcmp(bcd_mode, "Enable")) {
 		tmp |= BCD_EN; // Enable BCD, actual mode setting by BCD Mode Pins
@@ -132,6 +132,7 @@ static int ft313_platform_setup(struct usb_hcd *hcd)
 	if (retval)
 		return retval;
 
+#ifdef CONFIG_PM
 	ft313->wakeup_wq_name = FT313_WK_NAME;
 	ft313->wakeup_wq = create_singlethread_workqueue(FT313_WK_NAME);
 	if (ft313->wakeup_wq == NULL) {
@@ -139,25 +140,8 @@ static int ft313_platform_setup(struct usb_hcd *hcd)
 		return -ENOMEM;
 	}
 	INIT_WORK(&ft313->wakeup_work, ft313_wakeup_wq_handler);
-
-#if 0 // Move to ft313_run to avoid possible racing condtion
-	// Register a charater device
-	ft313->ft313_cdev_count = 1;
-	retval = alloc_chrdev_region(&ft313->ft313_cdev_major, 0, ft313->ft313_cdev_count, "ft313_hc");
-
-	if (retval)
-		return retval;
-	int devno = MKDEV(ft313->ft313_cdev_major, 0);
-
-	cdev_init(&ft313->ft313_cdev, &ft313_fops);
-	ft313->ft313_cdev.owner = THIS_MODULE;
-	retval = cdev_add(&ft313->ft313_cdev, devno, ft313->ft313_cdev_count);
-
-	if (retval) {
-		printk("Char device register fails\n");
-		return retval;
-	}
 #endif
+
 	return 0;
 }
 
@@ -229,9 +213,10 @@ static const struct hc_driver ft313_han9250_hc_driver = {
 	 */
 	.hub_status_data =	ft313_hub_status_data,
 	.hub_control =		ft313_hub_control,
+#ifdef CONFIG_PM
 	.bus_suspend =		ft313_bus_suspend,
 	.bus_resume =		ft313_bus_resume,
-
+#endif
 
 	// OTG
 	//.start_port_reset = ???,

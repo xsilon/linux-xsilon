@@ -72,23 +72,23 @@ static struct device* ftdi_device = NULL;
 
 /* Initial IRQ latency:  faster than hw default */
 static int log2_irq_thresh = 0;		// 0 to 6
-//module_param (log2_irq_thresh, int, S_IRUGO);
-//MODULE_PARM_DESC (log2_irq_thresh, "log2 IRQ latency, 1-64 microframes");
+module_param (log2_irq_thresh, int, S_IRUGO);
+MODULE_PARM_DESC (log2_irq_thresh, "log2 IRQ latency, 1-64 microframes");
 
 /* initial park setting:  slower than hw default */
-static unsigned park = 0;
-//module_param (park, uint, S_IRUGO); // FixMe: We may not want to use module parameter!
-//MODULE_PARM_DESC (park, "park setting; 1-3 back-to-back async packets");
+static unsigned park = 3;
+module_param (park, uint, S_IRUGO); // FixMe: We may not want to use module parameter!
+MODULE_PARM_DESC (park, "park setting; 1-3 back-to-back async packets");
 
 /* for flakey hardware, ignore overcurrent indicators */
-static int ignore_oc = 0;
-//module_param (ignore_oc, bool, S_IRUGO);
-//MODULE_PARM_DESC (ignore_oc, "ignore bogus hardware overcurrent indications");
+static bool ignore_oc = 0;
+module_param (ignore_oc, bool, S_IRUGO);
+MODULE_PARM_DESC (ignore_oc, "ignore bogus hardware overcurrent indications");
 
 /* Default BCD Mode Initilization */
-static char *bcd_mode = "Disabled";
-//module_param(bcd_mode, charp, 0000);
-//MODULE_PARM_DESC(bcd_mode, "Indicate BCD mode when HCD inserted");
+static char *bcd_mode = "Disable";
+module_param(bcd_mode, charp, 0000);
+MODULE_PARM_DESC(bcd_mode, "Indicate BCD mode when HCD inserted");
 #include "ft313_app.h"
 #include "ft313_def.h"
 #include "ft313.h"
@@ -114,21 +114,6 @@ static inline void safe_spin_unlock(spinlock_t* lock, unsigned long* flags)
 	}
 }
 
-#if 0
-/* Low level access APIs */
-static inline u8 ft313_reg_read8(const struct ft313_hcd *ft313,
-				   void __iomem * regs)
-{
-	u8 val;
-
-	val = ioread8(regs);
-
-#ifdef LOG_ON
-	print_reg_access_info(IO_READ, regs, val);
-#endif
-	return val;
-}
-#endif
 
 static inline u16 _ft313_reg_read16(const struct ft313_hcd *ft313,
 		void __iomem * regs)
@@ -262,27 +247,14 @@ void ft313_mem_read(struct ft313_hcd *ft313, void *buf, u16 length, u16 offset)
 	} else {
 		spin_lock_irqsave(&ft313->dataport_lock, flags);
 	}
-//	if (IS_8_BIT_MODE(ioread8(&ft313->cfg->sw_reset)))
-#ifdef FT313_IN_8_BIT_MODE
-	{ // 8 bit mode
-		ft313_reg_write16(ft313, 0x8000 | length, &ft313->cfg->data_session_len); //Set direction as read
-		ft313_reg_write16(ft313, offset, &ft313->cfg->mem_addr);
-		for (i = 0; i < length; i++)
-			*((u8*)(buf + i)) = ioread8(&ft313->cfg->data_port);
 
-	}
-#else // 16 bit mode
-	{
-		if (0 != (length % 2)) length++; // Software need to adjust length
-		ft313_reg_write16(ft313, 0x8000 | length, &ft313->cfg->data_session_len); //Set direction as read
-		//wmb();
-		ft313_reg_write16(ft313, offset, &ft313->cfg->mem_addr);
-		//mb();
+	if (0 != (length % 2)) length++; // Software need to adjust length
+	ft313_reg_write16(ft313, 0x8000 | length, &ft313->cfg->data_session_len); //Set direction as read
+	ft313_reg_write16(ft313, offset, &ft313->cfg->mem_addr);
 
-		for (i = 0; i < length; i += 2)
-			*((u16*)(buf + i)) = _ft313_reg_read16(ft313, &ft313->cfg->data_port);
-	}
-#endif
+	for (i = 0; i < length; i += 2)
+		*((u16*)(buf + i)) = _ft313_reg_read16(ft313, &ft313->cfg->data_port);
+
 	if (in_interrupt()) {
 		spin_unlock(&ft313->dataport_lock);
 	} else {
@@ -317,28 +289,13 @@ void ft313_mem_write(struct ft313_hcd *ft313, void *buf, u16 length, u16 offset)
 		spin_lock_irqsave(&ft313->dataport_lock, flags);
 	}
 
-//	if (IS_8_BIT_MODE(ioread8(&ft313->cfg->sw_reset)))
-#ifdef FT313_IN_8_BIT_MODE
-	{ // 8 bit mode
-		ft313_reg_write16(ft313, length, &ft313->cfg->data_session_len);
-		wmb();
-		ft313_reg_write16(ft313, offset, &ft313->cfg->mem_addr);
-		wmb();
-		for (i = 0; i < length; i++)
-			iowrite8(*((u8*)(buf + i)), &ft313->cfg->data_port);
-	}
-#else // 16 bit mode
-	{
-		if (0 != (length % 2)) length++; // Software need to adjust length
-		ft313_reg_write16(ft313, length, &ft313->cfg->data_session_len);
-		//wmb();
-		ft313_reg_write16(ft313, offset, &ft313->cfg->mem_addr);
-		//wmb();
+	if (0 != (length % 2)) length++; // Software need to adjust length
+	ft313_reg_write16(ft313, length, &ft313->cfg->data_session_len);
+	ft313_reg_write16(ft313, offset, &ft313->cfg->mem_addr);
 
-		for (i = 0; i < length; i += 2)
-			_ft313_reg_write16(ft313, *((u16*)(buf + i)), &ft313->cfg->data_port);
-	}
-#endif
+	for (i = 0; i < length; i += 2)
+		_ft313_reg_write16(ft313, *((u16*)(buf + i)), &ft313->cfg->data_port);
+
 	if (in_interrupt()) {
 		spin_unlock(&ft313->dataport_lock);
 	} else {
@@ -353,30 +310,6 @@ void ft313_mem_write(struct ft313_hcd *ft313, void *buf, u16 length, u16 offset)
 	}
 #endif
 
-}
-
-// FIXME: debug only
-void display_async_list(struct ft313_hcd* ft313)
-{
-	struct ehci_qh *prev;
-	u32 horizontal_ptr;
-	u32 async_reg;
-
-	printk("\n\nFT313 Async List as:\n\n");
-	prev = ft313->async;
-	ft313_mem_read(ft313, &horizontal_ptr, 4, prev->qh_ft313 + offsetof(struct ehci_qh_hw, hw_next));
-	printk("From qh 0x%X (horizon ptr 0x%X) -> ", prev->qh_ft313, horizontal_ptr);
-
-	while (prev->qh_next.qh != NULL) {
-		prev = prev->qh_next.qh;
-		ft313_mem_read(ft313, &horizontal_ptr, 4, prev->qh_ft313 + offsetof(struct ehci_qh_hw, hw_next));
-		printk("qh 0x%X (horizon ptr 0x%X)-> ", prev->qh_ft313, horizontal_ptr);
-	}
-	printk(" NULL \n");
-
-	async_reg = ft313_reg_read32(ft313, &ft313->regs->async_next);
-
-	printk("Current Async List Address at 0x%X\n\n\n", async_reg);
 }
 
 static void
@@ -462,19 +395,16 @@ static int ft313_halt (struct ft313_hcd *ft313)
 {
 	u32	temp = ft313_reg_read32(ft313, &ft313->regs->status);
 
+	DEBUG_MSG("Halt FT313\n");
+
 	/* disable any irqs left enabled by previous code */
 	ft313_reg_write32(ft313, 0, &ft313->regs->intr_enable);
 
-/*	if (ehci_is_TDI(ft313) && tdi_in_host_mode(ft313) == 0) {
-		return 0;
-	}
-*/
 	if ((temp & HCHALTED) != 0)
 		return 0;
 
 	temp = ft313_reg_read32(ft313, &ft313->regs->command);
 	temp &= ~RS;
-	ft313_reg_write32(ft313, temp, &ft313->regs->command);
 	ft313_reg_write32(ft313, temp, &ft313->regs->command);
 	return handshake (ft313, &ft313->regs->status,
 			  HCHALTED, HCHALTED, 16 * 125);
@@ -502,14 +432,11 @@ static int handshake_on_error_set_halt(struct ft313_hcd *ft313, void __iomem *pt
 static int ft313_reset (struct ft313_hcd *ft313)
 {
 	int	retval;
-	u32	command = ft313_reg_read32(ft313, &ft313->regs->command);
+	u32	command;
 
 	FUN_ENTRY();
-	/* If the EHCI debug controller is active, special care must be
-	 * taken before and after a host controller reset */
-//	if (ehci->debug && !dbgp_reset_prep())
-//		ehci->debug = NULL;
 
+	command = ft313_reg_read32(ft313, &ft313->regs->command);
 	command |= HC_RESET;
 	// dbg_cmd (ft313, "reset", command);
 	DEBUG_MSG("Reset FT313\n");
@@ -612,9 +539,6 @@ static void ft313_iaa_watchdog(unsigned long param)
 			COUNT (ft313->stats.lost_iaa);
 			ft313_reg_write32(ft313, INT_OAA, &ft313->regs->status);
 		}
-
-//		ehci_vdbg(ehci, "IAA watchdog: status %x cmd %x\n",
-//				status, cmd);
 		end_unlink_async(ft313);
 	}
 
@@ -684,9 +608,6 @@ static void ft313_shutdown(struct usb_hcd *hcd)
 
 	del_timer_sync(&ft313->watchdog);
 	del_timer_sync(&ft313->iaa_watchdog);
-#ifdef PORT_RESET_TIME_WORKAROUND
-	del_timer_sync(&ft313->port_reset_timer);
-#endif
 
 	spin_lock_irq(&ft313->lock);
 	ft313_silence_controller(ft313);
@@ -731,9 +652,6 @@ static void ft313_work (struct ft313_hcd *ft313)
 }
 
 static struct file_operations ft313_fops;
-#ifdef USE_UDEV
-static DEVICE_ATTR(ftdi, S_IWUSR | S_IRUGO, NULL, NULL);
-#endif
 /*
  * Called when the ft313_hcd module is removed.
  */
@@ -742,14 +660,6 @@ static void ft313_stop (struct usb_hcd *hcd)
 	struct ft313_hcd	*ft313 = hcd_to_ft313 (hcd);
 	u16 tmp;
 
-	//ehci_dbg (ft313, "stop\n");
-
-#ifdef USE_UDEV
-	device_remove_file(ftdi_device, &dev_attr_ftdi);
-	device_destroy(ftdi_class, MKDEV(ft313->ft313_cdev_major, 0));
-	class_unregister(ftdi_class);
-	class_destroy(ftdi_class);
-#endif
 	// deregister char device
 	cdev_del(&ft313->ft313_cdev);
 
@@ -757,15 +667,11 @@ static void ft313_stop (struct usb_hcd *hcd)
 	unregister_chrdev_region(ft313->ft313_cdev_major, ft313->ft313_cdev_count);
 
 	// deallocate workqueue
-	flush_workqueue(ft313->wakeup_wq);
 	destroy_workqueue(ft313->wakeup_wq);
 
 	/* no more interrupts ... */
 	del_timer_sync(&ft313->watchdog);
 	del_timer_sync(&ft313->iaa_watchdog);
-#ifdef PORT_RESET_TIME_WORKAROUND
-	del_timer_sync(&ft313->port_reset_timer);
-#endif
 
 	spin_lock_irq(&ft313->lock);
 	if (HC_IS_RUNNING (hcd->state))
@@ -774,9 +680,6 @@ static void ft313_stop (struct usb_hcd *hcd)
 	ft313_silence_controller(ft313);
 	ft313_reset (ft313);
 	spin_unlock_irq(&ft313->lock);
-
-//	remove_companion_file(ehci);
-//	remove_debug_files (ehci);
 
 	/* root hub is shut down separately (first, when possible) */
 	spin_lock_irq (&ft313->lock);
@@ -788,20 +691,6 @@ static void ft313_stop (struct usb_hcd *hcd)
 	// Shutdown V-Bus as well
 	tmp = ft313_reg_read16(ft313, &ft313->cfg->config);
 	ft313_reg_write16(ft313, VBUS_OFF | tmp, &ft313->cfg->config);
-
-//	if (ehci->amd_pll_fix == 1)
-//		usb_amd_dev_put();
-
-#ifdef	EHCI_STATS
-	ehci_dbg (ehci, "irq normal %ld err %ld reclaim %ld (lost %ld)\n",
-		ehci->stats.normal, ehci->stats.error, ehci->stats.reclaim,
-		ehci->stats.lost_iaa);
-	ehci_dbg (ehci, "complete %ld unlink %ld\n",
-		ehci->stats.complete, ehci->stats.unlink);
-#endif
-
-//	dbg_status (ehci, "ehci_stop completed",
-//		    ft313_reg_read32(ehci, &ehci->regs->status));
 }
 
 /* one-time init, only for memory state */
@@ -827,12 +716,6 @@ static int ft313_init(struct usb_hcd *hcd)
 	init_timer(&ft313->iaa_watchdog);
 	ft313->iaa_watchdog.function = ft313_iaa_watchdog;
 	ft313->iaa_watchdog.data = (unsigned long) ft313;
-
-#ifdef PORT_RESET_TIME_WORKAROUND
-	init_timer(&ft313->port_reset_timer);
-	ft313->port_reset_timer.function = ft313_clear_port_reset;
-	ft313->port_reset_timer.data = (unsigned long) ft313;
-#endif
 
 	hcc_params = ft313_reg_read32(ft313, &ft313->caps->hcc_params);
 
@@ -937,7 +820,6 @@ static int ft313_run (struct usb_hcd *hcd)
 
 	ft313_reg_write32(ft313, ft313->periodic_ft313, &ft313->regs->frame_list);
 	ft313_reg_write32(ft313, ft313->async->qh_ft313, &ft313->regs->async_next);
-
 	/*
 	 * hcc_params controls whether ehci->regs->segment must (!!!)
 	 * be used; it constrains QH/ITD/SITD and QTD locations.
@@ -958,9 +840,6 @@ static int ft313_run (struct usb_hcd *hcd)
 	ft313->command |= ASYN_PK_EN | (3<<8); //From Faraday reference code!
 	ft313->command |= RS;
 	ft313_reg_write32(ft313, ft313->command, &ft313->regs->command);
-	ft313_reg_write32(ft313, ft313->command, &ft313->regs->command);
-	ft313_reg_write32(ft313, ft313->command, &ft313->regs->command);
-//	dbg_cmd (ehci, "init", ehci->command);
 
 	/*
 	 * Start, enabling full USB 2.0 functionality ... usb 1.1 devices
@@ -987,13 +866,8 @@ static int ft313_run (struct usb_hcd *hcd)
 
 	ft313_reg_write32(ft313, INTR_MASK,
 		    &ft313->regs->intr_enable); /* Turn On Interrupts */
-
-#ifdef USB_SOF_INTR
-	ft313_reg_write16(ft313, 0x0002, &ft313->cfg->hc_int_en); // Turn on SOF Interrupt
-#else
 	ft313_reg_write16(ft313, FT313_INTR_MASK,
 		    &ft313->cfg->hc_int_en);    /* Turn on FT313H interrupts */
-#endif
 
 	// Register a charater device
 	ft313->ft313_cdev_count = 1;
@@ -1036,23 +910,22 @@ static irqreturn_t ft313_irq (struct usb_hcd *hcd)
 
 	spin_lock (&ft313->lock);
 
-#ifndef USB_SOF_INTR
-	DEBUG_MSG("ft313 irq handler is called\n");
-#endif
 	hc_int_sts = ft313_reg_read16(ft313, &ft313->cfg->hc_int_sts);
 	hc_int_en = ft313_reg_read16(ft313, &ft313->cfg->hc_int_en);
 
 	if ((hc_int_sts & hc_int_en) != 0) { // FT313 HC Interrupt
 		// Clean FT313 Interrupt
-#ifndef USB_SOF_INTR
 		DEBUG_MSG("FT313 Chip Interrupt is 0x%X, Enable bitmap is 0x%X\n", hc_int_sts, hc_int_en);
-#endif
 		ft313_reg_write16(ft313, hc_int_sts, &ft313->cfg->hc_int_sts);
 
 		tmp = hc_int_sts & hc_int_en; // Mask out these disabled
 
 		if (tmp & OCINT_EN) { // OC happens
-			ALERT_MSG("Over current happened!\n");
+			printk(KERN_ALERT "\n\n\n\n\n");
+			printk(KERN_ALERT "###################################\n");
+			printk(KERN_ALERT "#     Over current happened!      #\n");
+			printk(KERN_ALERT "###################################\n");
+			printk(KERN_ALERT "\n\n\n\n\n");
 
 			tmp = ft313_reg_read16(ft313, &ft313->cfg->config);
 			//Turn VBUS off
@@ -1063,6 +936,7 @@ static irqreturn_t ft313_irq (struct usb_hcd *hcd)
 			return IRQ_HANDLED;
 		}
 
+#ifdef CONFIG_PM
 		if (tmp & (WAKEUPINT | REMOTEWKINT)) {
 			DEBUG_MSG("Device connect/disconnect or remote wakeup happens during suspend\n");
 
@@ -1079,6 +953,7 @@ static irqreturn_t ft313_irq (struct usb_hcd *hcd)
 			FUN_EXIT();
 			return IRQ_HANDLED;
 		}
+#endif
 
 		if (tmp & CLKREADY) { // Chip just wakeup
 			tmp = ft313_reg_read16(ft313, &ft313->cfg->config);
@@ -1145,9 +1020,8 @@ another_int_generated:
 	/* clear (just) interrupts */
 	do {
 		ft313_reg_write32(ft313, masked_status, &ft313->regs->status);
-		DEBUG_MSG("Try to clean interrupt use 0x%X\n", masked_status);
+//		ALERT_MSG("Try to clean interrupt use 0x%X\n", masked_status);
 		temp = ft313_reg_read32(ft313, &ft313->regs->status);
-		DEBUG_MSG("Status register now is 0x%X\n", temp);
 		//if (temp & INTR_MASK) {
 		//	ALERT_MSG("Interrupt status is not cleared, will keep trying!!!\n");
 		//}
@@ -1206,6 +1080,8 @@ another_int_generated:
 
 //			ALERT_MSG("Port status reg is 0x%X\n", pstatus);
 
+//			ALERT_MSG("Now process port %d\n", i + 1);
+
 			if (pstatus & CONN_STS)
 				printk(KERN_ALERT "Device plugged into FT313H root hub %d %08x\n", i, status);
 			else
@@ -1250,7 +1126,7 @@ dead:
 	masked_status = status & INTR_MASK;
 
 	if (0 != masked_status) {
-		DEBUG_MSG("Another interrupt come during processing with masked value 0x%08x\n", masked_status);
+//		ALERT_MSG("Another interrupt come during processing with masked value 0x%X\n", masked_status);
 		goto another_int_generated;
 	}
 
@@ -1294,8 +1170,10 @@ static int ft313_urb_enqueue (
 		DEBUG_MSG("urb enqueue within interrupt context!\n");
 	}
 
-	DEBUG_MSG("urb 0x%p is issued with tranfer buffer length %d from 0x%p\n", urb, urb->transfer_buffer_length, urb->transfer_buffer);
-	DEBUG_MSG("And targeted for EP 0x%08x at Addr %d\n", urb->ep->desc.bEndpointAddress, usb_pipedevice(urb->pipe));
+	DEBUG_MSG("urb 0x%X is issued with tranfer buffer length %d from 0x%X with actual length %d\n",
+		  (unsigned int)urb, urb->transfer_buffer_length, (unsigned int)urb->transfer_buffer, urb->actual_length);
+	DEBUG_MSG("And targeted for EP 0x%X at Addr %d\n", urb->ep->desc.bEndpointAddress, usb_pipedevice(urb->pipe));
+
 
 	if (usb_pipetype (urb->pipe) == PIPE_BULK) { // queue for bulk transfer
 		/* if there is urb still under processing, we just queue the new urb */
@@ -1307,7 +1185,7 @@ static int ft313_urb_enqueue (
 			spin_lock_irqsave(&ft313->lock, flags);
 
 			if (qh->urb != NULL) { // There is still urb pending
-				DEBUG_MSG("Current pending urb for qH 0x%08X is 0x%p, have to Q new urb 0x%p\n", qh->qh_ft313, qh->urb, urb);
+				DEBUG_MSG("Current pending urb for qH 0x%X is 0x%X, have to Q new urb 0x%X\n", qh->qh_ft313, (unsigned int)qh->urb, (unsigned int)urb);
 				qh_urb_q_item = kmalloc(sizeof(struct qh_urb_queue_item), mem_flags);
 				if (NULL == qh_urb_q_item) {
 					spin_unlock_irqrestore(&ft313->lock, flags);
@@ -1318,13 +1196,14 @@ static int ft313_urb_enqueue (
 				qh_urb_q_item->mem_flags = mem_flags;
 				INIT_LIST_HEAD(&qh_urb_q_item->urb_list);
 				list_add_tail(&qh_urb_q_item->urb_list, &qh->urb_list);
-				DEBUG_MSG("urb 0x%p is saved for qH 0x%08X (0x%p)\n", urb, qh->qh_ft313, qh);
+				DEBUG_MSG("urb 0x%X is queued for qH 0x%X (0x%X)\n", (unsigned int)urb, qh->qh_ft313, (unsigned int)qh);
 
 				if (qh->urb == NULL) {
 					ALERT_MSG("This should not happen, if it does, reverse queuing\n");
 					list_del(&qh_urb_q_item->urb_list);
 					kfree(qh_urb_q_item);
-					ALERT_MSG("urb 0x%p restored for qH 0x%08x (0x%p)\n", urb, qh->qh_ft313, qh);
+					ALERT_MSG("urb 0x%X restored for qH 0x%X (0x%X)\n", (unsigned int)urb, qh->qh_ft313, (unsigned int)qh);
+					//spin_unlock_irqrestore(&ft313->lock, flags);
 				} else {
 					// Link URB to EP early for cancllation
 					rc = usb_hcd_link_urb_to_ep(hcd, urb);
@@ -1355,7 +1234,7 @@ static int ft313_urb_enqueue (
 			struct iso_urb_queue_item *iso_urb_q_item;
 
 			if (stream->urb != NULL) { // There is urb under execution
-				DEBUG_MSG("Current pending urb for stream 0x%p is 0x%p, have to Q new urb 0x%p\n", stream, stream->urb, urb);
+				DEBUG_MSG("Current pending urb for stream 0x%X is 0x%X, have to Q new urb 0x%X\n", (unsigned int)stream, (unsigned int)stream->urb, (unsigned int)urb);
 				iso_urb_q_item = kmalloc(sizeof(struct iso_urb_queue_item), mem_flags);
 				if (NULL == iso_urb_q_item) {
 					FUN_EXIT();
@@ -1366,7 +1245,7 @@ static int ft313_urb_enqueue (
 
 				INIT_LIST_HEAD(&iso_urb_q_item->urb_list);
 				list_add_tail(&iso_urb_q_item->urb_list, &stream->urb_list);
-				DEBUG_MSG("urb 0x%p is saved for stream 0x%p\n", urb, stream);
+				DEBUG_MSG("urb 0x%X is saved for stream 0x%X\n", (unsigned int)urb, (unsigned int)stream);
 
 				FUN_EXIT();
 				return 0;
@@ -1392,6 +1271,7 @@ static int ft313_urb_enqueue (
 			return -ENOMEM;
 		}
 		val = submit_async(ft313, urb, &qtd_list, mem_flags);
+		DEBUG_MSG("URB 0x%X is processed\n", (unsigned int)urb);
 		FUN_EXIT();
 		return val;
 
@@ -1420,7 +1300,7 @@ static int ft313_urb_enqueue_next (
 
 	FUN_ENTRY();
 
-	DEBUG_MSG("urb 0x%p is continuing be served\n", urb);
+	DEBUG_MSG("urb 0x%X is continuing be served\n", (unsigned int)urb);
 
 	INIT_LIST_HEAD (&qtd_list);
 
@@ -1429,7 +1309,7 @@ static int ft313_urb_enqueue_next (
 			/* qh_completions() code doesn't handle all the fault cases
 			 * in multi-TD control transfers.  Even 1KB is rare anyway.
 			 */
-			ERROR_MSG("Should not come here as Control transfer is small!\n");
+			ALERT_MSG("Should not come here as Control transfer is small!\n");
 			FUN_EXIT();
 			return -1;
 
@@ -1514,7 +1394,7 @@ static int ft313_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 	int			rc;
 
 	FUN_ENTRY();
-	DEBUG_MSG("urb to cancel is 0x%p\n", urb);
+	DEBUG_MSG("urb to cancel is 0x%X\n", (unsigned int)urb);
 
 	spin_lock_irqsave (&ft313->lock, flags);
 	rc = usb_hcd_check_unlink_urb(hcd, urb, status);
@@ -1590,8 +1470,7 @@ ft313_endpoint_disable (struct usb_hcd *hcd, struct usb_host_endpoint *ep)
 {
 	struct ft313_hcd	*ft313 = hcd_to_ft313 (hcd);
 	unsigned long		flags;
-	struct ehci_qh		*qh;
-	struct ehci_qh		*tmp;
+	struct ehci_qh		*qh, *tmp;
 
 	/* ASSERT:  any requests/urbs are being unlinked */
 	/* ASSERT:  nobody can be submitting urbs for this any more */
@@ -1620,7 +1499,7 @@ rescan:
 	case QH_STATE_COMPLETING:
 		for (tmp = ft313->async->qh_next.qh;
 				tmp && tmp != qh;
-				tmp = (struct ehci_qh *)tmp->qh_next.qh)
+				tmp = tmp->qh_next.qh)
 			continue;
 		/* periodic qh self-unlinks on empty, and a COMPLETING qh
 		 * may already be unlinked.
@@ -1639,6 +1518,12 @@ idle_timeout:
 		if (qh->clearing_tt)
 			goto idle_timeout;
 		if (list_empty (&qh->qtd_list)) {
+			// A dirty fix for qh refcount
+			if (qh->refcount != 1) {
+				ALERT_MSG("qH 0x%X count is %d, force it to one here\n", qh->qh_ft313, qh->refcount);
+				qh->refcount = 1;
+			}
+
 			qh_put (qh);
 			break;
 		}
@@ -1727,7 +1612,7 @@ int ft313_open(struct inode *inode, struct file *fp)
 	ft313 = container_of(inode->i_cdev, struct ft313_hcd, ft313_cdev);
 	fp->private_data = ft313; /* for other methods */
 
-	printk("FT313 device file opened with ft313 is %p\n", ft313);
+	printk("FT313 device file opened with ft313 is %X\n", (unsigned int)ft313);
 
 	return 0;
 }
@@ -1744,9 +1629,6 @@ long ft313_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 	struct usb_hcd *hcd;
 	int retval = -1;
 
-//	if (_IOC_TYPE(cmd) != FT313_IOC_MAGIC) return -ENOTTY;
-//	if (_IOC_NR(cmd) > FT313_IOC_MAXNR) return -ENOTTY;
-
 	ft313 = fp->private_data;
 
 	hcd = ft313_to_hcd(ft313);
@@ -1754,7 +1636,7 @@ long ft313_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 
 	switch (cmd) {
 		case FT313_IOC_SUSPEND:
-			ALERT_MSG("FT313: SUSPEND chip\n");
+			DEBUG_MSG("FT313: SUSPEND chip\n");
 
 			if (hcd->state == HC_STATE_SUSPENDED) {
 				ALERT_MSG("FT313 is already in suspend state\n");
@@ -1767,7 +1649,7 @@ long ft313_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 			break;
 
 		case FT313_IOC_RESUME:
-			ALERT_MSG("FT313: RESUME chip\n");
+			DEBUG_MSG("FT313: RESUME chip\n");
 
 			if (HC_STATE_RUNNING == hcd->state) {
 				ALERT_MSG("FT313 is not in suspend state! \n");
@@ -1776,17 +1658,6 @@ long ft313_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 			}
 			if(hcd->driver->bus_resume)
 				retval = hcd->driver->bus_resume(hcd);
-			break;
-
-		case FT313_IOC_RESET:
-			ALERT_MSG("FT313: RESET chip\n");
-			ft313_quiesce(ft313);
-			ft313_halt(ft313);
-			ft313_reset(ft313);
-			ssleep(1);
-			// Rerun FT313
-			ft313_run(hcd);
-			retval = 0;
 			break;
 
 		default:

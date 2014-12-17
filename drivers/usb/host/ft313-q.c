@@ -19,11 +19,11 @@ qtd_fill(struct ft313_hcd *ft313, struct ehci_qtd *qtd, void* buf,
 	int	i, count;
 	u32	addr;
 	size_t	actual_len;
-	struct ft313_mem_blk *mem_blk_ptr;
+	struct ft313_mem_blk *mem_blk_ptr = NULL;
 
 	FUN_ENTRY();
 
-	DEBUG_MSG("qTD buffer ptr is at 0x%p with token as 0x%08x\n", buf, token);
+	DEBUG_MSG("qTD buffer ptr is at 0x%X with token as 0x%08X\n", (unsigned int)buf, token);
 
 	if (len != 0) {
 		DEBUG_MSG("Try to allocate %d bytes buffer.\n", len);
@@ -32,7 +32,7 @@ qtd_fill(struct ft313_hcd *ft313, struct ehci_qtd *qtd, void* buf,
 			printk("No more memory block available \n");
 			return -1;
 		}
-		DEBUG_MSG("Got a buffer with size %d at 0x%08x.\n", mem_blk_ptr->size, mem_blk_ptr->offset);
+		DEBUG_MSG("Got a buffer with size %d at 0x%X.\n", mem_blk_ptr->size, mem_blk_ptr->offset);
 
 		actual_len = min(len, mem_blk_ptr->size);
 
@@ -63,7 +63,7 @@ qtd_fill(struct ft313_hcd *ft313, struct ehci_qtd *qtd, void* buf,
 	    (0 != actual_len) &&
 	    (QTD_PID(token) != 1)) { // Not IN transfer
 		if ((unsigned int)buf <= 0x10000) {
-			ERROR_MSG("buf 0x%p pointer is not valid \n", buf);
+			ERROR_MSG("buf 0x%X pointer is not valid \n", (unsigned int)buf);
 			return -1;
 		}
 		ft313_mem_write(ft313, buf, actual_len, mem_blk_ptr->offset); // Write payload
@@ -124,14 +124,14 @@ qh_update (struct ft313_hcd *ft313, struct ehci_qh *qh, struct ehci_qtd *qtd)
 			&(hw->hw_qtd_next),
 			sizeof(hw->hw_qtd_next),
 			qh->qh_ft313 + offsetof(struct ehci_qh_hw, hw_qtd_next));
-	DEBUG_MSG("Updated Next qTD Pointer for qH 0x%08x\n", qh->qh_ft313);
+	DEBUG_MSG("Updated Next qTD Pointer for qH 0x%X\n", qh->qh_ft313);
 
 	hw->hw_alt_next = EHCI_LIST_END(ft313);
 	ft313_mem_write(ft313,
 			&(hw->hw_alt_next),
 			sizeof(hw->hw_alt_next),
 			qh->qh_ft313 + offsetof(struct ehci_qh_hw, hw_alt_next));
-	DEBUG_MSG("Updated Alternate Next qTD Pointer for qH 0x%08x\n", qh->qh_ft313);
+	DEBUG_MSG("Updated Alternate Next qTD Pointer for qH 0x%X\n", qh->qh_ft313);
 
 	/* Except for control endpoints, we make hardware maintain data
 	 * toggle (like OHCI) ... here (re)initialize the toggle in the QH,
@@ -145,12 +145,12 @@ qh_update (struct ft313_hcd *ft313, struct ehci_qh *qh, struct ehci_qtd *qtd)
 		epnum = (hc32_to_cpup(ft313, &hw->hw_info1) >> 8) & 0x0f;
 		if (unlikely (!usb_gettoggle (qh->dev, epnum, is_out))) {
 			hw->hw_token &= ~cpu_to_hc32(ft313, QTD_TOGGLE);
-			DEBUG_MSG("Clear DT toggle bit for qH 0x%p\n", qh->ft313);
+			DEBUG_MSG("Clear DT toggle bit for qH 0x%X\n", qh->qh_ft313);
 			ft313_mem_write(ft313,
 					&(hw->hw_token),
 					sizeof(hw->hw_token),
 					qh->qh_ft313 + offsetof(struct ehci_qh_hw, hw_token));
-			DEBUG_MSG("Updated Token DWord for qH 0x%08x\n", qh->qh_ft313);
+			DEBUG_MSG("Updated Token DWord for qH 0x%X\n", qh->qh_ft313);
 			usb_settoggle (qh->dev, epnum, is_out, 1);
 		}
 	}
@@ -162,7 +162,7 @@ qh_update (struct ft313_hcd *ft313, struct ehci_qh *qh, struct ehci_qtd *qtd)
 			&(hw->hw_token),
 			sizeof(hw->hw_token),
 			qh->qh_ft313 + offsetof(struct ehci_qh_hw, hw_token));
-	DEBUG_MSG("Updated Token DWord for qH 0x%08x\n", qh->qh_ft313);
+	DEBUG_MSG("Updated Token DWord for qH 0x%X\n", qh->qh_ft313);
 
 	DEBUG_MSG("Exit--\n");
 }
@@ -177,9 +177,10 @@ qh_refresh (struct ft313_hcd *ft313, struct ehci_qh *qh)
 	struct ehci_qtd *qtd;
 
 	FUN_ENTRY();
+
 	if (list_empty (&qh->qtd_list)) {
 		qtd = qh->dummy;
-		DEBUG_MSG("qH 0x%08x has an empty qTD list\n", qh->qh_ft313);
+		DEBUG_MSG("qH 0x%X has an empty qTD list\n", qh->qh_ft313);
 	}
 	else {
 		qtd = list_entry (qh->qtd_list.next,
@@ -188,7 +189,7 @@ qh_refresh (struct ft313_hcd *ft313, struct ehci_qh *qh)
 		ft313_mem_read(ft313, qtd, sizeof(struct ehci_qtd_hw), qtd->qtd_ft313);
 		ft313_mem_read(ft313, qh->hw, sizeof(struct ehci_qh_hw), qh->qh_ft313);
 		if (cpu_to_hc32(ft313, qtd->qtd_ft313) == qh->hw->hw_current) {
-			DEBUG_MSG("qTD 0x%08x is the same as qH 0x%08x's current qTD Pointer\n",
+			DEBUG_MSG("qTD 0x%X is the same as qH 0x%X's current qTD Pointer\n",
 				  qtd->qtd_ft313, qh->qh_ft313);
 			DEBUG_MSG("No qh_update\n");
 			qtd = NULL;
@@ -199,21 +200,6 @@ qh_refresh (struct ft313_hcd *ft313, struct ehci_qh *qh)
 		qh_update (ft313, qh, qtd);
 
 	FUN_EXIT();
-}
-
-static void ft313_clear_tt_buffer_complete(struct usb_hcd *hcd,
-		struct usb_host_endpoint *ep)
-{
-	struct ft313_hcd	*ft313 = hcd_to_ft313(hcd);
-	struct ehci_qh		*qh = ep->hcpriv;
-	unsigned long		flags;
-
-	spin_lock_irqsave(&ft313->lock, flags);
-	qh->clearing_tt = 0;
-	if (qh->qh_state == QH_STATE_IDLE && !list_empty(&qh->qtd_list)
-			&& HC_IS_RUNNING(hcd->state))
-		qh_link_async(ft313, qh);
-	spin_unlock_irqrestore(&ft313->lock, flags);
 }
 
 static void ft313_clear_tt_buffer(struct ft313_hcd *ft313, struct ehci_qh *qh,
@@ -247,6 +233,21 @@ static void ft313_clear_tt_buffer(struct ft313_hcd *ft313, struct ehci_qh *qh,
 		}
 	}
 	FUN_EXIT();
+}
+
+static void ft313_clear_tt_buffer_complete(struct usb_hcd *hcd,
+		struct usb_host_endpoint *ep)
+{
+	struct ft313_hcd	*ft313 = hcd_to_ft313(hcd);
+	struct ehci_qh		*qh = ep->hcpriv;
+	unsigned long		flags;
+
+	spin_lock_irqsave(&ft313->lock, flags);
+	qh->clearing_tt = 0;
+	if (qh->qh_state == QH_STATE_IDLE && !list_empty(&qh->qtd_list)
+			&& HC_IS_RUNNING(hcd->state))
+		qh_link_async(ft313, qh);
+	spin_unlock_irqrestore(&ft313->lock, flags);
 }
 
 static int urb_copy_sglist_buffer(struct urb *urb)
@@ -336,7 +337,7 @@ static int qtd_copy_status (
 	u32	actual_rx_data_length = 0;
 	void	*buf = NULL;
 
-	DEBUG_MSG("Enter++ with token as 0x%08x\n", token);
+	DEBUG_MSG("Enter++ with token as 0x%X\n", token);
 
 	/* count IN/OUT bytes, not SETUP (even short packets) */
 	if (likely (QTD_PID (token) != 2)) {
@@ -344,12 +345,12 @@ static int qtd_copy_status (
 		if (QTD_PID(token) == 1) {
 			actual_rx_data_length = length - QTD_LENGTH(token);
 			if (0 != actual_rx_data_length) {// 0 means qTD for status phase for ctrl without data phase
-				DEBUG_MSG("Receive %d bytes for urb 0x%p\n", actual_rx_data_length, urb);
+				DEBUG_MSG("Receive %d bytes for urb 0x%X\n", actual_rx_data_length, (unsigned int)urb);
 
 				if (urb->transfer_buffer == NULL) {
 					ERROR_MSG("Only DMA address is provided\n");
 					buf = phys_to_virt(urb->transfer_dma) + urb->actual_length;
-					ERROR_MSG("buffer ptr used for copy data IN will be 0x%p\n", buf);
+					ERROR_MSG("buffer ptr used for copy data IN will be 0x%X\n", (unsigned int)buf);
 				}
 				else
 					buf = urb->transfer_buffer + urb->actual_length;
@@ -361,7 +362,7 @@ static int qtd_copy_status (
 			}
 		}
 		urb->actual_length += (length - QTD_LENGTH (token));
-		DEBUG_MSG("urb 0x%p actual_length field become %d\n", urb, urb->actual_length);
+		DEBUG_MSG("urb 0x%X actual_length field become %d\n", (unsigned int)urb, urb->actual_length);
 	}
 
 	/* don't modify error codes */
@@ -376,14 +377,13 @@ static int qtd_copy_status (
 
 	/* serious "can't proceed" faults reported by the hardware */
 	if (token & QTD_STS_HALT) {
-		ALERT_MSG("\n\n\n FT313 Serious Can't proceed error!!!");
 		if (token & QTD_STS_BABBLE) {
 			/* FIXME "must" disable babbling device's port too */
-			ALERT_MSG("   FT313 got USB babbling error!!! \n\n\n");
+			ALERT_MSG("\n\n\n FT313 got USB babbing error!!! \n\n\n");
 			status = -EOVERFLOW;
 		/* CERR nonzero + halt --> stall */
 		} else if (QTD_CERR(token)) {
-			DEBUG_MSG("urb 0x%p is stalled\n", urb);
+			DEBUG_MSG("urb 0x%X is stalled\n", (unsigned int)urb);
 			status = -EPIPE;
 
 		/* In theory, more than one of the following bits can be set
@@ -392,7 +392,6 @@ static int qtd_copy_status (
 		 */
 		} else if (token & QTD_STS_MMF) {
 			/* fs/ls interrupt xfer missed the complete-split */
-			ALERT_MSG("   fs/ls interrupt xfer missed the complete-split!!! \n\n\n");
 			status = -EPROTO;
 		} else if (token & QTD_STS_DBE) {
 			status = (QTD_PID (token) == 1) /* IN ? */
@@ -400,7 +399,7 @@ static int qtd_copy_status (
 				: -ECOMM; /* hc couldn't write data */
 		} else if (token & QTD_STS_XACT) {
 			/* timeout, bad CRC, wrong PID, etc */
-			printk(KERN_NOTICE "devpath %s ep%d%s 3strikes\n",
+			ft313_dbg(ft313, "devpath %s ep%d%s 3strikes\n",
 				urb->dev->devpath,
 				usb_pipeendpoint(urb->pipe),
 				usb_pipein(urb->pipe) ? "in" : "out");
@@ -433,7 +432,6 @@ __acquires(ehci->lock)
 		struct ehci_qh	*qh = (struct ehci_qh *) urb->hcpriv;
 
 		/* S-mask in a QH means it's an interrupt urb */
-		// FixMe: Is hw_info2 need update from FT313?
 		if ((qh->hw->hw_info2 & cpu_to_hc32(ft313, QH_SMASK)) != 0) {
 
 			/* ... update hc-wide periodic stats (for usbfs) */
@@ -489,8 +487,6 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 	unsigned		count = 0;
 	u8			state;
 	struct ehci_qh_hw	*hw = qh->hw;
-	struct urb		*urb = NULL;
-	struct ehci_qtd		*qtd = NULL;
 	int			last_seg_still_active = 0;
 	int			got_short_packet = 0;
 	int			qh_in_unlink = 0;
@@ -502,12 +498,11 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 		return count;
 	}
 
-	// Update qH from FT313 memory
-	DEBUG_MSG("Update qH 0x%08x from FT313 memory\n", qh->qh_ft313);
+	DEBUG_MSG("Update qH 0x%X from FT313 memory\n", qh->qh_ft313);
 	ft313_mem_read(ft313, hw, sizeof(*hw), qh->qh_ft313);
 
 	if (unlikely (list_empty (&qh->qtd_list))) {
-		DEBUG_MSG("qH 0x%08x has empty qTD list\n", qh->qh_ft313);
+		DEBUG_MSG("qH 0x%X has empty qTD list\n", qh->qh_ft313);
 		FUN_EXIT();
 		return count;
 	}
@@ -525,7 +520,7 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 	state = qh->qh_state;
 	qh->qh_state = QH_STATE_COMPLETING;
 	stopped = (state == QH_STATE_IDLE);
-	DEBUG_MSG("Value of stopped is %d as qH 0x%08x status is %d\n", stopped, qh->qh_ft313, state);
+	DEBUG_MSG("Value of stopped is %d as qH 0x%X status is %d\n", stopped, qh->qh_ft313, state);
 
  rescan:
 	last = NULL;
@@ -538,8 +533,8 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 	 * if queue is stopped, handles unlinks.
 	 */
 	list_for_each_safe (entry, tmp, &qh->qtd_list) {
-		//struct ehci_qtd	*qtd;
-		//struct urb	*urb;
+		struct ehci_qtd	*qtd;
+		struct urb	*urb;
 		u32		token = 0;
 
 		qtd = list_entry (entry, struct ehci_qtd, qtd_list);
@@ -550,7 +545,7 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 		}
 
 		urb = qtd->urb;
-		DEBUG_MSG("urb associated with qTD 0x%08x is 0x%p\n", qtd->qtd_ft313, urb);
+		DEBUG_MSG("urb associated with qTD 0x%X is 0x%X\n", qtd->qtd_ft313, (unsigned int)urb);
 
 		/* clean up any state from previous QTD ...*/
 		if (last) {
@@ -571,7 +566,7 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 		}
 		/* hardware copies qtd out of qh overlay */
 		rmb ();
-		DEBUG_MSG("Update qTD 0x%08x hw token from FT313 \n", qtd->qtd_ft313);
+		DEBUG_MSG("Update qTD 0x%X hw token from FT313 \n", qtd->qtd_ft313);
 		ft313_mem_read(ft313,
 			       &(qtd->hw_token),
 			       sizeof(qtd->hw_token),
@@ -620,6 +615,7 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 				ALERT_MSG("detected XactErr len %zu/%zu retry %d\n",
 					qtd->length - QTD_LENGTH(token), qtd->length, qh->xacterrs);
 				ALERT_MSG("token 0x%08x\n", token);
+				display_mm_status(ft313, TRUE);
 				stopped = 1;
 
 			/* magic dummy for some short reads; qh won't advance.
@@ -724,7 +720,7 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 			last = list_entry (qtd->qtd_list.prev,
 					struct ehci_qtd, qtd_list);
 			last->hw_next = qtd->hw_next;
-			DEBUG_MSG("Update qTD 0x%08x's hw_next ptr to 0x%08x\n", last->qtd_ft313, qtd->hw_next);
+			DEBUG_MSG("Update qTD 0x%X's hw_next ptr to 0x%X\n", last->qtd_ft313, qtd->hw_next);
 			ft313_mem_write(ft313,
 					&(qtd->hw_next),
 					sizeof(qtd->hw_next),
@@ -746,7 +742,7 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 		    (1 == got_short_packet) || // Got short packet case
 		    (last_status != -EINPROGRESS) || // Error happens from copy_urb_status()
 		    (last->urb->actual_length == last->urb->transfer_buffer_length)) { // Really complete
-			DEBUG_MSG("urb 0x%p is done out of loop by qH 0x%08x\n", last->urb, qh->qh_ft313);
+			DEBUG_MSG("urb 0x%X is done out of loop by qH 0x%X\n", (unsigned int)last->urb, qh->qh_ft313);
 
 			if (!list_empty(&qh->urb_list) &&
 			   (usb_pipetype (last->urb->pipe) == PIPE_BULK)) {
@@ -758,14 +754,14 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 				qh->urb = qh_urb_q_item->urb;
 				qh->urb_pending = 1;
 				qh->mem_flags = last->mem_flags;
-				DEBUG_MSG("urb 0x%p is waiting already\n", qh->urb);
+				DEBUG_MSG("urb 0x%X is waiting already\n", (unsigned int)qh->urb);
 				list_del(&qh_urb_q_item->urb_list);
 				kfree(qh_urb_q_item);
 			} else {
 				// Nothing to do
 				qh->urb = NULL;
 				qh->urb_pending = 0;
-				DEBUG_MSG("qh 0x%08x (0x%p) is idle already\n", qh->qh_ft313, qh);
+				DEBUG_MSG("qh 0x%X (0x%X) is idle already\n", qh->qh_ft313, (unsigned int)qh);
 			}
 
 			if (last->urb->num_sgs > 0 &&
@@ -795,7 +791,7 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 					qh->urb = last->urb;
 					qh->mem_flags = last->mem_flags;
 					ft313_qtd_free(ft313, last);
-					DEBUG_MSG("Program next segment of urb 0x%p\n", last->urb);
+					DEBUG_MSG("Program next segment of urb 0x%X\n", (unsigned int)last->urb);
 				} else {
 					ALERT_MSG("Last segment is still Active, error case!\n");
 					qh->urb_pending = 0;
@@ -846,7 +842,7 @@ qh_completions (struct ft313_hcd *ft313, struct ehci_qh *qh)
 
 	/* Do we need to rescan for URBs dequeued during a giveback? */
 	if (unlikely(qh->needs_rescan)) {
-		DEBUG_MSG("qH 0x%08x need rescan\n", qh->qh_ft313);
+		DEBUG_MSG("qH 0x%X need rescan\n", qh->qh_ft313);
 		/* If the QH is already unlinked, do the rescan now. */
 		if (state == QH_STATE_IDLE)
 			goto rescan;
@@ -941,7 +937,7 @@ qh_urb_transaction (
 ) {
 	struct ehci_qtd		*qtd, *qtd_prev;
 	void			*buf;
-	int			len, this_sg_len, maxpacket;
+	int			len, this_sg_len, maxpacket = 0;
 	int			is_input;
 	u32			token;
 	int			i;
@@ -964,7 +960,7 @@ qh_urb_transaction (
 	/* for split transactions, SplitXState initialized to zero */
 
 	len = urb->transfer_buffer_length - urb->actual_length;
-	DEBUG_MSG("urb 0x%p reminding payload size is %d\n", urb, len);
+	DEBUG_MSG("urb 0x%X reminding payload size is %d\n", (unsigned int)urb, len);
 
 	if (usb_pipebulk(urb->pipe) &&
 	    (len < 0)) {
@@ -984,9 +980,11 @@ qh_urb_transaction (
 			goto cleanup;
 		}
 
+
 		/* ... and always at least one more pid */
 		token ^= QTD_TOGGLE;
 		qtd_prev = qtd;
+
 		qtd = ft313_qtd_alloc (ft313, flags);
 		if (unlikely (!qtd)) {
 			ALERT_MSG("qTD allocation fail for ctrl transfer !!!\n");
@@ -1063,7 +1061,7 @@ qh_urb_transaction (
 		this_qtd_len = qtd_fill(ft313, qtd, buf, this_sg_len, token,
 				maxpacket);
 		if (this_qtd_len < 0) {
-			ERROR_MSG("qTD 0x%08x filling error\n", qtd->qtd_ft313);
+			ERROR_MSG("qTD 0x%X filling error\n", qtd->qtd_ft313);
 			goto cleanup;
 		}
 		this_sg_len -= this_qtd_len;
@@ -1111,6 +1109,7 @@ qh_urb_transaction (
 			ERROR_MSG("This urb requires additional Zero Length Packet\n");
 			one_more = 1;
 		}
+
 		if (one_more) {
 			qtd_prev = qtd;
 			qtd = ft313_qtd_alloc (ft313, flags);
@@ -1230,6 +1229,7 @@ qh_make (
 			int		think_time;
 
 			DEBUG_MSG("Full/low speed Interrupt tranfer\n");
+
 			/* gap is f(FS/LS transfer times) */
 			qh->gap_uf = 1 + usb_calc_bus_time (urb->dev->speed,
 					is_input, 0, maxp) / (125 * 1000);
@@ -1365,28 +1365,12 @@ static void qh_link_async (struct ft313_hcd *ft313, struct ehci_qh *qh)
 		u32	cmd = ft313_reg_read32(ft313, &ft313->regs->command);
 
 		if (!(cmd & ASCH_EN)) {
-			int i;
 			/* in case a clear of CMD_ASE didn't take yet */
 			(void)handshake(ft313, &ft313->regs->status,
 					ASCH_STS, 0, 150);
 			cmd |= ASCH_EN | RS;
-			DEBUG_MSG("Start Async Schedule for qH 0x%08x\n", qh->qh_ft313);
-
+			DEBUG_MSG("Start Async Schedule for qH 0x%X\n", qh->qh_ft313);
 			ft313_reg_write32(ft313, cmd, &ft313->regs->command);
-			ft313_reg_read32(ft313, &ft313->regs->command);
-	
-			i=0;
-			while(_ft313_reg_read32(ft313, &ft313->regs->status) & HCHALTED) {
-				i++;
-				ft313_reg_write32(ft313, cmd, &ft313->regs->command);
-				ft313_reg_read32(ft313, &ft313->regs->command);
-				udelay(125);
-				if(i==10) {
-					printk(KERN_ERR "******************** FAILED TO START *****************\n");
-					break;
-				}
-			}
-
 			ft313_to_hcd(ft313)->state = HC_STATE_RUNNING;
 			/* posted write need not be known to HC yet ... */
 		}
@@ -1446,7 +1430,7 @@ static struct ehci_qh *qh_append_tds (
 	}
 
 	if (NULL != qh)
-		DEBUG_MSG("qH 0x%08x is used to serve EP 0x%08x at Addr %d\n", \
+		DEBUG_MSG("qH 0x%X is used to serve EP 0x%X at Addr %d\n", \
 			  qh->qh_ft313, epnum, usb_pipedevice(urb->pipe));
 
 	if (likely (qh != NULL)) {
@@ -1495,7 +1479,7 @@ static struct ehci_qh *qh_append_tds (
 			dma = dummy->qtd_dma;
 			dma_ft313 = dummy->qtd_ft313;
 			*dummy = *qtd;
-			DEBUG_MSG("Dummy qTD for qH 0x%08x is at 0x%08x originally\n", qh->qh_ft313, dma_ft313);
+			DEBUG_MSG("Dummy qTD for qH 0x%X is at 0x%X originally\n", qh->qh_ft313, dma_ft313);
 			ft313_mem_write(ft313, qtd, sizeof(struct ehci_qtd_hw), dma_ft313); //Copy in ft313 memory also
 			dummy->qtd_dma = dma;
 			dummy->qtd_ft313 = dma_ft313;
@@ -1505,7 +1489,7 @@ static struct ehci_qh *qh_append_tds (
 			list_splice_tail(qtd_list, &qh->qtd_list);
 
 			ft313_qtd_init(ft313, qtd, qtd->qtd_dma);
-			DEBUG_MSG("qTD 0x%08x become new dummy for qH 0x%08x\n", qtd->qtd_ft313, qh->qh_ft313);
+			DEBUG_MSG("qTD 0x%X become new dummy for qH 0x%X\n", qtd->qtd_ft313, qh->qh_ft313);
 			qh->dummy = qtd;
 
 			/* hc must see the new dummy at list end */
@@ -1547,10 +1531,11 @@ submit_async (
 	int			epnum;
 	unsigned long		flags;
 	struct ehci_qh		*qh = NULL;
-	int			rc;
+	int			rc = 0;
 
 	FUN_ENTRY();
-	DEBUG_MSG("mem flags for ctrl or bulk is 0x%08x\n", mem_flags);
+
+	DEBUG_MSG("mem flags for ctrl or bulk is 0x%X\n", mem_flags);
 
 	epnum = urb->ep->desc.bEndpointAddress;
 
@@ -1592,7 +1577,7 @@ submit_async (
 	if (likely (qh->qh_state == QH_STATE_IDLE))
 		qh_link_async(ft313, qh);
 	else {
-		DEBUG_MSG("qh 0x%08x is not idle but %d \n", qh->qh_ft313, qh->qh_state);
+		DEBUG_MSG("qh 0x%X is not idle but %d \n", qh->qh_ft313, qh->qh_state);
 	}
 
  done:
@@ -1616,7 +1601,6 @@ submit_async_next (
 	gfp_t			mem_flags
 ) {
 	int			epnum;
-//	unsigned long		flags;
 	struct ehci_qh		*qh = NULL;
 	int			rc = 0;
 
@@ -1637,7 +1621,6 @@ submit_async_next (
 	}
 #endif
 
-//	spin_lock_irqsave (&ft313->lock, flags);
 	if (unlikely(!HCD_HW_ACCESSIBLE(ft313_to_hcd(ft313)))) {
 		rc = -ESHUTDOWN;
 		goto done;
@@ -1666,11 +1649,10 @@ submit_async_next (
 	if (unlikely (qh->qh_state == QH_STATE_IDLE))
 		qh_link_async(ft313, qh);
 	else {
-		DEBUG_MSG("qh 0x%08x is not idle but %d \n", qh->qh_ft313, qh->qh_state);
+		DEBUG_MSG("qh 0x%X is not idle but %d \n", qh->qh_ft313, qh->qh_state);
 	}
 
 done:
-//	spin_unlock_irqrestore (&ft313->lock, flags);
 	if (unlikely (qh == NULL)) {
 		qtd_list_free (ft313, urb, qtd_list);
 	}
@@ -1726,10 +1708,10 @@ static void end_unlink_async (struct ft313_hcd *ft313)
 				struct ehci_qh *next_qh;
 				next_qh = qh->qh_next.qh;
 				ft313_reg_write32(ft313, next_qh->qh_ft313, &ft313->regs->async_next);
-				ERROR_MSG("Set async list reg as 0x%08x\n", next_qh->qh_ft313);
+				ERROR_MSG("Set async list reg as 0x%X\n", next_qh->qh_ft313);
 			} else {
 				ft313_reg_write32(ft313, ft313->async->qh_ft313, &ft313->regs->async_next);
-				ERROR_MSG("Set async list reg as 0x%08x, the default one\n", ft313->async->qh_ft313);
+				ERROR_MSG("Set async list reg as 0x%X, the default one\n", ft313->async->qh_ft313);
 			}
 
 			// Restore Asyncronous schedule bit if stopped above
@@ -1745,7 +1727,7 @@ static void end_unlink_async (struct ft313_hcd *ft313)
 
 	// qh->hw_next = cpu_to_hc32(qh->qh_dma);
 	qh->qh_state = QH_STATE_IDLE;
-	DEBUG_MSG("qH 0x%08x is made state QH_STATE_IDLE\n", qh->qh_ft313);
+	DEBUG_MSG("qH 0x%X is made state QH_STATE_IDLE\n", qh->qh_ft313);
 	qh->qh_next.qh = NULL;
 	qh_put (qh);			// refcount from reclaim
 
@@ -1834,9 +1816,9 @@ static void start_unlink_async (struct ft313_hcd *ft313, struct ehci_qh *qh)
 	}
 
 	qh->qh_state = QH_STATE_UNLINK;
-	DEBUG_MSG("qH 0x%08x is set as UNLINK state\n", qh->qh_ft313);
+	DEBUG_MSG("qH 0x%X is set as UNLINK state\n", qh->qh_ft313);
 	ft313->reclaim = qh = qh_get (qh);
-	DEBUG_MSG("Set qh 0x%08x (%p) as qH for reclaim\n", qh->qh_ft313, qh);
+	DEBUG_MSG("Set qh 0x%X (%p) as qH for reclaim\n", qh->qh_ft313, qh);
 
 	prev = ft313->async;
 //	DEBUG_MSG("From qh 0x%08x -> ", prev->qh_ft313);
@@ -1904,7 +1886,8 @@ static void scan_async (struct ft313_hcd *ft313)
 		if (!list_empty(&qh->qtd_list)) {
 			int temp;
 
-			DEBUG_MSG("qH 0x%08x qTD list is not empty\n", qh->qh_ft313);
+			DEBUG_MSG("qH 0x%X qTD list is not empty\n", qh->qh_ft313);
+
 			/*
 			 * Unlinks could happen here; completion reporting
 			 * drops the lock.  That's why ehci->qh_scan_next
@@ -1938,6 +1921,7 @@ static void scan_async (struct ft313_hcd *ft313)
 				} else {
 					ALERT_MSG("Bug in queuing\n");
 				}
+
 			}
 		}
 
