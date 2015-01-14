@@ -415,10 +415,13 @@ void mac802154_wpan_setup(struct net_device *dev)
 	get_random_bytes(&priv->dsn, 1);
 
 	/* defaults per 802.15.4-2011 */
-	priv->mac_params.min_be = 3;
-	priv->mac_params.max_be = 5;
-	priv->mac_params.csma_retries = 4;
-	priv->mac_params.frame_retries = -1; /* for compatibility, actual default is 3 */
+	/* Xsilon hack with our defaults as we have no netlink support to set these yet */
+	priv->mac_params.min_be = 4;
+	priv->mac_params.max_be = 9;
+	priv->mac_params.csma_retries = 8;
+	priv->mac_params.frame_retries = 4;
+	priv->mac_params.cca_mode = 3;
+	priv->mac_params.cca_ed_level = 0xce;
 
 	priv->pan_id = cpu_to_le16(IEEE802154_PANID_BROADCAST);
 	priv->short_addr = cpu_to_le16(IEEE802154_ADDR_BROADCAST);
