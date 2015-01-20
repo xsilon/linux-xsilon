@@ -421,7 +421,7 @@ void mac802154_wpan_setup(struct net_device *dev)
 	priv->mac_params.csma_retries = 8;
 	priv->mac_params.frame_retries = 4;
 	priv->mac_params.cca_mode = 3;
-	priv->mac_params.cca_ed_level = 0xce;
+	priv->mac_params.cca_ed_level = -50;
 
 	priv->pan_id = cpu_to_le16(IEEE802154_PANID_BROADCAST);
 	priv->short_addr = cpu_to_le16(IEEE802154_ADDR_BROADCAST);
@@ -480,6 +480,10 @@ mac802154_subif_frame(struct mac802154_sub_if_data *sdata, struct sk_buff *skb,
 		break;
 	default:
 		spin_unlock_bh(&sdata->mib_lock);
+<<<<<<< HEAD
+=======
+		pr_debug("invalid dest mode\n");
+>>>>>>> 4a8e320c929991c9480a7b936512c57ea02d87b2
 		kfree_skb(skb);
 		return NET_RX_DROP;
 	}
@@ -491,8 +495,7 @@ mac802154_subif_frame(struct mac802154_sub_if_data *sdata, struct sk_buff *skb,
 	rc = mac802154_llsec_decrypt(&sdata->sec, skb);
 	if (rc) {
 		pr_debug("decryption failed: %i\n", rc);
-		kfree_skb(skb);
-		return NET_RX_DROP;
+		goto fail;
 	}
 
 	sdata->dev->stats.rx_packets++;
@@ -504,9 +507,12 @@ mac802154_subif_frame(struct mac802154_sub_if_data *sdata, struct sk_buff *skb,
 	default:
 		pr_warn("ieee802154: bad frame received (type = %d)\n",
 			mac_cb(skb)->type);
-		kfree_skb(skb);
-		return NET_RX_DROP;
+		goto fail;
 	}
+
+fail:
+	kfree_skb(skb);
+	return NET_RX_DROP;
 }
 
 static void mac802154_print_addr(const char *name,
