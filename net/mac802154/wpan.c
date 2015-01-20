@@ -480,10 +480,7 @@ mac802154_subif_frame(struct mac802154_sub_if_data *sdata, struct sk_buff *skb,
 		break;
 	default:
 		spin_unlock_bh(&sdata->mib_lock);
-<<<<<<< HEAD
-=======
 		pr_debug("invalid dest mode\n");
->>>>>>> 4a8e320c929991c9480a7b936512c57ea02d87b2
 		kfree_skb(skb);
 		return NET_RX_DROP;
 	}
