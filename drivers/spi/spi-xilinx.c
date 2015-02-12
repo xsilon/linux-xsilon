@@ -87,6 +87,7 @@ struct xilinx_spi {
 	const u8 *tx_ptr;	/* pointer in the Rx buffer */
 	int remaining_bytes;	/* the number of bytes left to transfer */
 	u8 bits_per_word;
+	u32 cs_inactive;	/* Level of the CS pins when inactive*/
 	unsigned int (*read_fn)(void __iomem *);
 	void (*write_fn)(u32, void __iomem *);
 	void (*tx_fn)(struct xilinx_spi *);
@@ -182,28 +183,33 @@ static void xspi_init_hw(struct xilinx_spi *xspi)
 static void xilinx_spi_chipselect(struct spi_device *spi, int is_on)
 {
 	struct xilinx_spi *xspi = spi_master_get_devdata(spi->master);
+	u16 cr;
+	u32 cs;
 
 	if (is_on == BITBANG_CS_INACTIVE) {
 		/* Deselect the slave on the SPI bus */
-		xspi->write_fn(0xffff, xspi->regs + XSPI_SSR_OFFSET);
-	} else if (is_on == BITBANG_CS_ACTIVE) {
-		/* Set the SPI clock phase and polarity */
-		u16 cr = xspi->read_fn(xspi->regs + XSPI_CR_OFFSET)
-			 & ~XSPI_CR_MODE_MASK;
-		if (spi->mode & SPI_CPHA)
-			cr |= XSPI_CR_CPHA;
-		if (spi->mode & SPI_CPOL)
-			cr |= XSPI_CR_CPOL;
-		xspi->write_fn(cr, xspi->regs + XSPI_CR_OFFSET);
+		xspi->write_fn(xspi->cs_inactive, xspi->regs + XSPI_SSR_OFFSET);
+		return;
+ 	}
 
-		/* We do not check spi->max_speed_hz here as the SPI clock
-		 * frequency is not software programmable (the IP block design
-		 * parameter)
-		 */
+	/* Set the SPI clock phase and polarity */
+	cr = xspi->read_fn(xspi->regs + XSPI_CR_OFFSET)	& ~XSPI_CR_MODE_MASK;
+	if (spi->mode & SPI_CPHA)
+		cr |= XSPI_CR_CPHA;
+	if (spi->mode & SPI_CPOL)
+		cr |= XSPI_CR_CPOL;
+	xspi->write_fn(cr, xspi->regs + XSPI_CR_OFFSET);
 
-		/* Activate the chip select */
-		xspi->write_fn(~(0x0001 << spi->chip_select),
-			xspi->regs + XSPI_SSR_OFFSET);
+	/* We do not check spi->max_speed_hz here as the SPI clock
+	 * frequency is not software programmable (the IP block design
+	 * parameter)
+	 */
+
+	cs = xspi->cs_inactive;
+	cs ^= BIT(spi->chip_select);
+
+	/* Activate the chip select */
+	xspi->write_fn(cs, xspi->regs + XSPI_SSR_OFFSET);
 	}
 }
 
@@ -213,6 +219,12 @@ static void xilinx_spi_chipselect(struct spi_device *spi, int is_on)
 static int xilinx_spi_setup_transfer(struct spi_device *spi,
 		struct spi_transfer *t)
 {
+	struct xilinx_spi *xspi = spi_master_get_devdata(spi->master);
+
+	if (spi->mode & SPI_CS_HIGH)
+		xspi->cs_inactive &= ~BIT(spi->chip_select);
+	else
+		xspi->cs_inactive |= BIT(spi->chip_select);
 	return 0;
 }
 
@@ -360,9 +372,10 @@ static int xilinx_spi_probe(struct platform_device *pdev)
 		return -ENODEV;
 
 	/* the spi->mode bits understood by this driver: */
-	master->mode_bits = SPI_CPOL | SPI_CPHA;
+	master->mode_bits = SPI_CPOL | SPI_CPHA | SPI_CS_HIGH;;
 
 	xspi = spi_master_get_devdata(master);
+	xspi->cs_inactive = 0xffffffff;
 	xspi->bitbang.master = master;
 	xspi->bitbang.chipselect = xilinx_spi_chipselect;
 	xspi->bitbang.setup_transfer = xilinx_spi_setup_transfer;
