@@ -210,7 +210,6 @@ static void xilinx_spi_chipselect(struct spi_device *spi, int is_on)
 
 	/* Activate the chip select */
 	xspi->write_fn(cs, xspi->regs + XSPI_SSR_OFFSET);
-	}
 }
 
 /* spi_bitbang requires custom setup_transfer() to be defined if there is a
